@@ -6,5 +6,27 @@
 </head>
 <body>
   <h1>What up, this my site</h1>
+
+  <section id="heat-of-the-week">
+    <h2>Heat of the Week</h2>
+    <p>This is where you can catch the heat of the week.</p>
+    <button id="music-toggle">▶ Play music</button>
+    <audio id="bg-music" src="assets/HOTW 1.mp3" loop></audio>
+  </section>
+
+  <script>
+    const music = document.getElementById('bg-music');
+    const toggle = document.getElementById('music-toggle');
+
+    toggle.addEventListener('click', () => {
+      if (music.paused) {
+        music.play();
+        toggle.textContent = '⏸ Pause music';
+      } else {
+        music.pause();
+        toggle.textContent = '▶ Play music';
+      }
+    });
+  </script>
 </body>
 </html>
