@@ -14,6 +14,16 @@
     <audio id="bg-music" src="assets/HOTW 1.mp3" loop></audio>
   </section>
 
+  <section id="comments">
+    <h2>Comments</h2>
+    <form id="comment-form">
+      <input type="text" id="comment-name" placeholder="Your name" required maxlength="50">
+      <textarea id="comment-text" placeholder="Say something..." required maxlength="500"></textarea>
+      <button type="submit">Post</button>
+    </form>
+    <div id="comment-list"></div>
+  </section>
+
   <script>
     const music = document.getElementById('bg-music');
     const toggle = document.getElementById('music-toggle');
@@ -37,5 +47,58 @@
         </div>
 
 <!-- END AADS AD UNIT 2455284 -->
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAurvQEXDZINvBrHbMQQU3yC_9xmqQfwj0",
+      authDomain: "diarmuid-webpage.firebaseapp.com",
+      projectId: "diarmuid-webpage",
+      storageBucket: "diarmuid-webpage.firebasestorage.app",
+      messagingSenderId: "234273109755",
+      appId: "1:234273109755:web:45996e94fdca4ad520225e"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const commentForm = document.getElementById('comment-form');
+    const nameInput = document.getElementById('comment-name');
+    const textInput = document.getElementById('comment-text');
+    const commentList = document.getElementById('comment-list');
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    commentForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = nameInput.value.trim();
+      const text = textInput.value.trim();
+      if (!name || !text) return;
+
+      db.collection('comments').add({
+        name,
+        text,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      commentForm.reset();
+    });
+
+    db.collection('comments').orderBy('timestamp', 'desc').onSnapshot((snapshot) => {
+      commentList.innerHTML = '';
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const when = data.timestamp ? data.timestamp.toDate().toLocaleString() : 'just now';
+        const entry = document.createElement('div');
+        entry.className = 'comment';
+        entry.innerHTML = `<strong>${escapeHtml(data.name)}</strong> ${escapeHtml(data.text)} <small>${when}</small>`;
+        commentList.appendChild(entry);
+      });
+    });
+  </script>
 </body>
 </html>
