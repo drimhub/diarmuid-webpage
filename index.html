@@ -7,6 +7,23 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Diarmuid's Site</title>
+  <style>
+    body {
+      position: relative;
+      margin: 0;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: url("assets/gang.jpg");
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      opacity: 0.1;
+      z-index: -1;
+    }
+  </style>
 </head>
 <body>
   <h1>What up, this my site</h1>
