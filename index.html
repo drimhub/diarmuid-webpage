@@ -3,9 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
   <title>Diarmuid's Site</title>
   <style>
     body {
@@ -44,6 +41,27 @@
     </form>
     <div id="comment-list"></div>
   </section>
+
+  <script>
+    async function checkForNewVersion() {
+      try {
+        const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
+        const { version } = await res.json();
+        const seen = localStorage.getItem('siteVersion');
+        if (seen && seen !== version) {
+          location.href = location.pathname + '?v=' + version;
+          return;
+        }
+        localStorage.setItem('siteVersion', version);
+      } catch (e) {
+        // offline or fetch blocked — nothing to do
+      }
+    }
+    checkForNewVersion();
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) checkForNewVersion();
+    });
+  </script>
 
   <script>
     const music = document.getElementById('bg-music');
