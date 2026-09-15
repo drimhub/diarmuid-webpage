@@ -32,8 +32,13 @@
     <audio id="bg-music" src="assets/HOTW 1.mp3" loop></audio>
   </section>
 
+  <section id="top-songs">
+    <h2>Top Songs (last 30 days)</h2>
+    <ol id="top-songs-list"><li>Loading...</li></ol>
+  </section>
+
   <section id="comments">
-    <h2>Comments</h2>
+    <h2>Comments - Check in below, say what's up, hang out</h2>
     <form id="comment-form">
       <input type="text" id="comment-name" placeholder="Your name" required maxlength="50">
       <textarea id="comment-text" placeholder="Say something..." required maxlength="500"></textarea>
@@ -76,6 +81,102 @@
         toggle.textContent = '▶ Play music';
       }
     });
+  </script>
+
+  <script>
+    const LASTFM_API_KEY = 'd38c7bd2ac7c70ddd3accb62ffdfdfdb';
+    const LASTFM_USERNAME = 'diarmuidcoffey';
+    const LASTFM_DAYS = 30;
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    async function fetchRecentTracks(apiKey, fromTs) {
+      const tracks = [];
+      let page = 1;
+      let totalPages = 1;
+
+      while (page <= totalPages) {
+        const params = new URLSearchParams({
+          method: 'user.getrecenttracks',
+          user: LASTFM_USERNAME,
+          api_key: apiKey,
+          format: 'json',
+          from: fromTs,
+          limit: 200,
+          page: page,
+        });
+
+        const response = await fetch(`https://ws.audioscrobbler.com/2.0/?${params}`);
+        const data = await response.json();
+
+        if (data.error) {
+          throw new Error(`Last.fm API error ${data.error}: ${data.message || 'no message provided'}`);
+        }
+
+        const recent = data.recenttracks;
+        totalPages = parseInt(recent['@attr'].totalPages, 10);
+
+        for (const track of recent.track) {
+          if (track['@attr'] && track['@attr'].nowplaying === 'true') continue;
+          const images = Object.fromEntries((track.image || []).map(img => [img.size, img['#text']]));
+          tracks.push({
+            artist: track.artist['#text'],
+            track: track.name,
+            imageUrl: images.extralarge || '',
+          });
+        }
+
+        page += 1;
+      }
+
+      return tracks;
+    }
+
+    function topSongs(tracks, n = 5) {
+      const counts = new Map();
+      const images = new Map();
+
+      for (const t of tracks) {
+        const key = `${t.artist}|||${t.track}`;
+        counts.set(key, (counts.get(key) || 0) + 1);
+        images.set(key, t.imageUrl);
+      }
+
+      return [...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, n)
+        .map(([key, count]) => {
+          const [artist, track] = key.split('|||');
+          return { artist, track, count, imageUrl: images.get(key) };
+        });
+    }
+
+    async function renderTopSongs() {
+      const list = document.getElementById('top-songs-list');
+      try {
+        const fromTs = Math.floor(Date.now() / 1000) - LASTFM_DAYS * 24 * 60 * 60;
+        const tracks = await fetchRecentTracks(LASTFM_API_KEY, fromTs);
+        const top = topSongs(tracks, 5);
+
+        list.innerHTML = '';
+        for (const { artist, track, count, imageUrl } of top) {
+          const li = document.createElement('li');
+          li.innerHTML = `
+            ${imageUrl ? `<img src="${imageUrl}" alt="" width="40" height="40" style="vertical-align:middle;margin-right:8px;">` : ''}
+            <strong>${escapeHtml(artist)}</strong> - ${escapeHtml(track)} (${count} plays)
+          `;
+          list.appendChild(li);
+        }
+      } catch (e) {
+        list.innerHTML = `<li>Couldn't load top songs: ${escapeHtml(e.message)}</li>`;
+      }
+    }
+
+    renderTopSongs();
   </script>
 
   <!-- BEGIN AADS AD UNIT 2455284 -->
