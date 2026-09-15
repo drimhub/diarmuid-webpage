@@ -53,11 +53,11 @@
         const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
         const { version } = await res.json();
         const seen = localStorage.getItem('siteVersion');
+        localStorage.setItem('siteVersion', version);
         if (seen && seen !== version) {
           location.href = location.pathname + '?v=' + version;
           return;
         }
-        localStorage.setItem('siteVersion', version);
       } catch (e) {
         // offline or fetch blocked — nothing to do
       }
