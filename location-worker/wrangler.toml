@@ -1,0 +1,7 @@
+name = "diarmuid-location-api"
+main = "src/index.js"
+compatibility_date = "2026-09-15"
+
+kv_namespaces = [
+  { binding = "LOCATION_KV", id = "877bc35c0a984e84ae7d20de2a42922c" }
+]
