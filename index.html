@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Diarmuid's Site</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <style>
     body {
       position: relative;
@@ -37,6 +38,12 @@
     <ol id="top-songs-list"><li>Loading...</li></ol>
   </section>
 
+  <section id="location">
+    <h2>Last Location</h2>
+    <div id="location-map" style="height: 300px;"></div>
+    <p id="location-status">Loading...</p>
+  </section>
+
   <section id="comments">
     <h2>Comments - Check in below, say what's up, hang out</h2>
     <form id="comment-form">
@@ -46,6 +53,39 @@
     </form>
     <div id="comment-list"></div>
   </section>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script>
+    const LOCATION_API_URL =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'http://localhost:8787/api/location'
+        : 'https://diarmuid-location-api.diarmuidcoffey99.workers.dev/api/location';
+
+    async function renderLocation() {
+      const status = document.getElementById('location-status');
+      try {
+        const res = await fetch(LOCATION_API_URL);
+        const data = await res.json();
+        if (!data) {
+          status.textContent = 'No location received yet.';
+          return;
+        }
+
+        const { timestamp, lat, long } = data;
+        const map = L.map('location-map').setView([lat, long], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors',
+        }).addTo(map);
+        L.marker([lat, long]).addTo(map);
+
+        const when = new Date(timestamp).toLocaleString();
+        status.textContent = `${lat}, ${long} at ${when}`;
+      } catch (e) {
+        status.textContent = "Couldn't load location.";
+      }
+    }
+    renderLocation();
+  </script>
 
   <script>
     async function checkForNewVersion() {
