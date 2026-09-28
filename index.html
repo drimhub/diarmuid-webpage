@@ -81,7 +81,7 @@
 
         for (const p of points) {
           const when = new Date(p.timestamp).toLocaleString();
-          L.marker([p.lat, p.long]).addTo(map).bindPopup(`${p.lat}, ${p.long}<br>${when}`);
+          L.marker([p.lat, p.long]).addTo(map).bindPopup(when);
         }
 
         const when = new Date(latest.timestamp).toLocaleString();
