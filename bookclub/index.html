@@ -47,6 +47,11 @@
       </label>
     </p>
     <div id="join-avatar-preview"></div>
+    <p>
+      <label>Bio (optional)<br>
+        <textarea id="join-bio" maxlength="280" rows="3" style="width:300px;"></textarea>
+      </label>
+    </p>
     <p id="join-error" class="hidden" style="color:red;"></p>
     <p>
       <button id="join-submit">Join</button>
@@ -61,6 +66,18 @@
     <p id="login-empty" class="hidden">No one's joined yet - be the first!</p>
     <p><button id="login-cancel">Cancel</button></p>
   </div>
+
+  <div id="profile-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;">
+    <div style="background:white;padding:20px;max-width:280px;margin:80px auto;text-align:center;">
+      <img id="profile-modal-img" src="" alt="" style="max-width:100%;border-radius:8px;">
+      <p id="profile-modal-name" style="font-weight:bold;"></p>
+      <p id="profile-modal-bio"></p>
+      <button id="profile-modal-close">Close</button>
+    </div>
+  </div>
+
+  <h2>Edit Bio</h2>
+  <div id="edit-bio"></div>
 
   <h2>My Availability</h2>
   <div id="availability"></div>
@@ -112,6 +129,23 @@
     function isModerator(name) {
       return name === 'Moderator';
     }
+
+    function openProfileModal(name, avatar, bio) {
+      document.getElementById('profile-modal-img').src = avatar;
+      document.getElementById('profile-modal-name').textContent = name;
+      document.getElementById('profile-modal-bio').textContent = bio || '';
+      document.getElementById('profile-modal').classList.remove('hidden');
+    }
+    function closeProfileModal() {
+      document.getElementById('profile-modal').classList.add('hidden');
+    }
+    document.getElementById('profile-modal-close').addEventListener('click', closeProfileModal);
+    document.getElementById('profile-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'profile-modal') closeProfileModal();
+    });
+    document.getElementById('best-dates').addEventListener('click', (e) => {
+      if (e.target.tagName === 'IMG') openProfileModal(e.target.title, e.target.src, e.target.dataset.bio);
+    });
 
     function escapeHtml(str) {
       const div = document.createElement('div');
@@ -228,6 +262,7 @@
           clearIdentity();
           renderAuthWidget();
           renderComposer();
+          renderEditBio();
           renderAvailability();
         });
       } else {
@@ -253,6 +288,49 @@
         el.innerHTML = `<p>Join the club or log in to join the discussion.</p>`;
       }
     }
+
+    async function renderEditBio() {
+      const el = document.getElementById('edit-bio');
+      const identity = getIdentity();
+      if (!identity) {
+        el.innerHTML = '<p>Join the club or log in to set your bio.</p>';
+        return;
+      }
+
+      el.innerHTML = '<p>Loading...</p>';
+      let bio = '';
+      try {
+        const doc = await db.collection('bookclub_members').doc(identity.id).get();
+        if (doc.exists) bio = doc.data().bio || '';
+      } catch {
+        // couldn't load existing bio — start from empty
+      }
+
+      el.innerHTML = `
+        <p>
+          <textarea id="bio-input" maxlength="280" rows="3" style="width:300px;">${escapeHtml(bio)}</textarea>
+        </p>
+        <p>
+          <button id="bio-save">Save</button>
+          <span id="bio-saved" class="hidden">Saved!</span>
+        </p>
+      `;
+
+      document.getElementById('bio-save').addEventListener('click', async () => {
+        const newBio = document.getElementById('bio-input').value.trim();
+        const saveBtn = document.getElementById('bio-save');
+        const savedMsg = document.getElementById('bio-saved');
+        saveBtn.disabled = true;
+        savedMsg.classList.add('hidden');
+        try {
+          await db.collection('bookclub_members').doc(identity.id).update({ bio: newBio });
+          savedMsg.classList.remove('hidden');
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+    }
+    renderEditBio();
 
     async function renderAvailability() {
       const el = document.getElementById('availability');
@@ -363,7 +441,11 @@
         }
         entry.innerHTML = `
           <img src="${c.avatar}" alt="" style="${AVATAR_STYLE}">
-          <strong>${escapeHtml(c.name)}</strong> ${escapeHtml(c.text)} <small>${when}</small>`;
+          <strong class="comment-name" style="cursor:pointer;text-decoration:underline;">${escapeHtml(c.name)}</strong> ${escapeHtml(c.text)} <small>${when}</small>`;
+        entry.querySelector('.comment-name').addEventListener('click', () => {
+          const member = membersById[c.memberId];
+          openProfileModal(c.name, c.avatar, member ? member.bio : '');
+        });
         feed.appendChild(entry);
       });
     });
@@ -395,7 +477,7 @@
 
       el.innerHTML = sortedDates.map((date) => {
         const people = tally[date];
-        const avatars = people.map((p) => `<img src="${p.avatar}" alt="" title="${escapeHtml(p.name)}" style="${AVATAR_STYLE}">`).join('');
+        const avatars = people.map((p) => `<img src="${p.avatar}" alt="" title="${escapeHtml(p.name)}" data-bio="${escapeHtml(p.bio || '')}" style="${AVATAR_STYLE}cursor:pointer;">`).join('');
         return `
           <p>
             <strong>${escapeHtml(date)}</strong> - ${people.length} available<br>
@@ -445,6 +527,7 @@
       joinName.value = '';
       joinAvatarInput.value = '';
       joinAvatarPreview.innerHTML = '';
+      document.getElementById('join-bio').value = '';
       joinError.classList.add('hidden');
       joinForm.classList.remove('hidden');
       joinName.focus();
@@ -493,10 +576,12 @@
           avatar = defaultAvatar(name);
         }
 
+        const bio = document.getElementById('join-bio').value.trim();
         const docRef = await db.collection('bookclub_members').add({
           name,
           nameLower,
           avatar,
+          bio,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -504,6 +589,7 @@
         closeJoinForm();
         renderAuthWidget();
         renderComposer();
+        renderEditBio();
         renderAvailability();
       } catch (e) {
         showJoinError("Couldn't join right now - try again.");
@@ -540,6 +626,7 @@
             closeLoginForm();
             renderAuthWidget();
             renderComposer();
+            renderEditBio();
             renderAvailability();
           });
           loginList.appendChild(row);
