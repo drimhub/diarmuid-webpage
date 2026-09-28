@@ -100,6 +100,10 @@
     const BOOK_COVERS_DIR = '/assets/book-covers';
     const BOOK_CYCLE_INTERVAL_MS = 3000;
 
+    function isModerator(name) {
+      return name === 'Moderator';
+    }
+
     function escapeHtml(str) {
       const div = document.createElement('div');
       div.textContent = str;
@@ -342,6 +346,7 @@
         const when = c.timestamp ? c.timestamp.toDate().toLocaleString() : 'just now';
         const entry = document.createElement('div');
         entry.className = 'comment';
+        if (isModerator(c.name)) entry.style.fontWeight = 'bold';
         entry.innerHTML = `
           <img src="${c.avatar}" alt="" style="${AVATAR_STYLE}">
           <strong>${escapeHtml(c.name)}</strong> ${escapeHtml(c.text)} <small>${when}</small>`;
@@ -514,7 +519,8 @@
         snap.forEach((doc) => {
           const m = doc.data();
           const row = document.createElement('p');
-          row.innerHTML = `<button type="button" data-id="${doc.id}"><img src="${m.avatar}" alt="" style="${AVATAR_STYLE}">${escapeHtml(m.name)}</button>`;
+          const moderatorStyle = isModerator(m.name) ? 'background:black;color:white;' : '';
+          row.innerHTML = `<button type="button" data-id="${doc.id}" style="${moderatorStyle}"><img src="${m.avatar}" alt="" style="${AVATAR_STYLE}">${escapeHtml(m.name)}</button>`;
           row.querySelector('button').addEventListener('click', () => {
             setIdentity({ id: doc.id, name: m.name, avatar: m.avatar });
             closeLoginForm();
