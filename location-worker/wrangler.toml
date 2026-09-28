@@ -2,6 +2,7 @@ name = "diarmuid-location-api"
 main = "src/index.js"
 compatibility_date = "2026-09-15"
 
-kv_namespaces = [
-  { binding = "LOCATION_KV", id = "877bc35c0a984e84ae7d20de2a42922c" }
-]
+[[d1_databases]]
+binding = "LOCATION_DB"
+database_name = "diarmuid-locations"
+database_id = "a01b69f7-a6a2-481c-9f59-0c927f181687"

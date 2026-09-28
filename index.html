@@ -39,7 +39,7 @@
   </section>
 
   <section id="location">
-    <h2>Last Location</h2>
+    <h2>Locations</h2>
     <div id="location-map" style="height: 300px;"></div>
     <p id="location-status">Loading...</p>
   </section>
@@ -65,21 +65,27 @@
       const status = document.getElementById('location-status');
       try {
         const res = await fetch(LOCATION_API_URL);
-        const data = await res.json();
-        if (!data) {
+        const points = await res.json();
+        if (!points || points.length === 0) {
           status.textContent = 'No location received yet.';
           return;
         }
 
-        const { timestamp, lat, long } = data;
-        const map = L.map('location-map').setView([lat, long], 13);
+        const latest = points[points.length - 1];
+        const map = L.map('location-map').setView([latest.lat, latest.long], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OpenStreetMap contributors',
         }).addTo(map);
-        L.marker([lat, long]).addTo(map);
 
-        const when = new Date(timestamp).toLocaleString();
-        status.textContent = `${lat}, ${long} at ${when}`;
+        L.polyline(points.map(p => [p.lat, p.long]), { color: '#3388ff' }).addTo(map);
+
+        for (const p of points) {
+          const when = new Date(p.timestamp).toLocaleString();
+          L.marker([p.lat, p.long]).addTo(map).bindPopup(`${p.lat}, ${p.long}<br>${when}`);
+        }
+
+        const when = new Date(latest.timestamp).toLocaleString();
+        status.textContent = `Latest: ${latest.lat}, ${latest.long} at ${when} (${points.length} points)`;
       } catch (e) {
         status.textContent = "Couldn't load location.";
       }

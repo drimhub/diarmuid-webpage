@@ -1,5 +1,5 @@
 // Cloudflare Worker — GET/POST /api/location
-// Requires a KV namespace bound as LOCATION_KV, and a secret LOCATION_SECRET
+// Requires a D1 database bound as LOCATION_DB, and a secret LOCATION_SECRET
 // (see wrangler.toml + `wrangler secret put LOCATION_SECRET`).
 
 const CORS_HEADERS = {
@@ -41,13 +41,21 @@ export default {
       }
 
       const timestamp = new Date().toISOString();
-      await env.LOCATION_KV.put('latest', JSON.stringify({ timestamp, lat, long }));
+      await env.LOCATION_DB
+        .prepare('INSERT INTO locations (timestamp, lat, long) VALUES (?, ?, ?)')
+        .bind(timestamp, lat, long)
+        .run();
       return new Response('OK', { status: 200, headers: CORS_HEADERS });
     }
 
     if (request.method === 'GET') {
-      const data = await env.LOCATION_KV.get('latest');
-      return new Response(data ?? 'null', {
+      const limit = Math.min(parseInt(url.searchParams.get('limit'), 10) || 500, 2000);
+      const { results } = await env.LOCATION_DB
+        .prepare('SELECT timestamp, lat, long FROM locations ORDER BY timestamp DESC LIMIT ?')
+        .bind(limit)
+        .all();
+      results.reverse();
+      return new Response(JSON.stringify(results), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       });
     }
