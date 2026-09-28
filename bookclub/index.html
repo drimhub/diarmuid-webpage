@@ -346,7 +346,12 @@
         const when = c.timestamp ? c.timestamp.toDate().toLocaleString() : 'just now';
         const entry = document.createElement('div');
         entry.className = 'comment';
-        if (isModerator(c.name)) entry.style.fontWeight = 'bold';
+        if (isModerator(c.name)) {
+          entry.style.fontWeight = 'bold';
+          entry.style.background = 'black';
+          entry.style.color = 'white';
+          entry.style.padding = '6px';
+        }
         entry.innerHTML = `
           <img src="${c.avatar}" alt="" style="${AVATAR_STYLE}">
           <strong>${escapeHtml(c.name)}</strong> ${escapeHtml(c.text)} <small>${when}</small>`;
