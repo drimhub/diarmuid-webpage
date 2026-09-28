@@ -21,9 +21,25 @@
       opacity: 0.1;
       z-index: -1;
     }
+    #bookclub-banner {
+      display: inline-block;
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 9999;
+      font-weight: bold;
+      text-decoration: none;
+      color: #d1004a;
+      background: #ffe3ee;
+      border: 2px solid #d1004a;
+      border-radius: 6px;
+      padding: 6px 14px;
+      transition: top 4s ease-in-out, left 4s ease-in-out;
+    }
   </style>
 </head>
 <body>
+  <a id="bookclub-banner" href="/bookclub">NEW: bookclub</a>
   <h1>What up, this my site</h1>
 
   <section id="heat-of-the-week">
@@ -91,6 +107,20 @@
       }
     }
     renderLocation();
+  </script>
+
+  <script>
+    const bookclubBanner = document.getElementById('bookclub-banner');
+
+    function moveBookclubBanner() {
+      const maxLeft = Math.max(0, window.innerWidth - bookclubBanner.offsetWidth - 10);
+      const maxTop = Math.max(0, window.innerHeight - bookclubBanner.offsetHeight - 10);
+      bookclubBanner.style.left = `${10 + Math.random() * maxLeft}px`;
+      bookclubBanner.style.top = `${10 + Math.random() * maxTop}px`;
+    }
+
+    moveBookclubBanner();
+    setInterval(moveBookclubBanner, 5000);
   </script>
 
   <script>
