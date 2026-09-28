@@ -146,6 +146,9 @@
     document.getElementById('best-dates').addEventListener('click', (e) => {
       if (e.target.tagName === 'IMG') openProfileModal(e.target.title, e.target.src, e.target.dataset.bio);
     });
+    document.getElementById('members-row').addEventListener('click', (e) => {
+      if (e.target.tagName === 'IMG') openProfileModal(e.target.title, e.target.src, e.target.dataset.bio);
+    });
 
     function escapeHtml(str) {
       const div = document.createElement('div');
@@ -498,7 +501,8 @@
         img.src = m.avatar;
         img.alt = m.name;
         img.title = m.name;
-        img.style = AVATAR_STYLE;
+        img.dataset.bio = m.bio || '';
+        img.style = `${AVATAR_STYLE}cursor:pointer;`;
         row.appendChild(img);
       });
       snapshot.forEach((doc) => {
