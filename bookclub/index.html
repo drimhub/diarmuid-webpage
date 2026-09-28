@@ -62,6 +62,12 @@
     <p><button id="login-cancel">Cancel</button></p>
   </div>
 
+  <h2>My Availability</h2>
+  <div id="availability"></div>
+
+  <h2>Best Dates</h2>
+  <div id="best-dates"></div>
+
   <h2>Members</h2>
   <p id="members-row"></p>
   <p id="members-count"></p>
@@ -86,8 +92,13 @@
 
     const IDENTITY_KEY = 'bookclubMember';
     const AVATAR_STYLE = 'width:32px;height:32px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px;';
-    const CURRENT_BOOK_ISBNS = ['9780241457696', '9780413450807', '9780374163761'];
-    const BOOK_CYCLE_INTERVAL_MS = 5000;
+    const CURRENT_BOOK = {
+      title: "The Goalkeeper's Fear of the Penalty Kick",
+      author: 'Peter Handke',
+      pages: 96,
+    };
+    const BOOK_COVERS_DIR = '/assets/book-covers';
+    const BOOK_CYCLE_INTERVAL_MS = 3000;
 
     function escapeHtml(str) {
       const div = document.createElement('div');
@@ -155,68 +166,35 @@
       });
     }
 
-    async function fetchBookDetailsHtml(isbn) {
-      const res = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
-      if (!res.ok) throw new Error('Book not found');
-      const book = await res.json();
-
-      const authorNames = await Promise.all(
-        (book.authors || []).map(async (a) => {
-          try {
-            const r = await fetch(`https://openlibrary.org${a.key}.json`);
-            const data = await r.json();
-            return data.name;
-          } catch {
-            return null;
-          }
-        })
-      );
-      const authorLine = authorNames.filter(Boolean).join(', ');
-
-      let description = '';
-      if (book.works && book.works[0]) {
-        try {
-          const workRes = await fetch(`https://openlibrary.org${book.works[0].key}.json`);
-          const work = await workRes.json();
-          if (work.description) {
-            description = typeof work.description === 'string' ? work.description : work.description.value;
-          }
-        } catch {
-          // no description available — skip
-        }
-      }
-
-      const coverUrl = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
-
-      return `
-        <p>
-          <img src="${coverUrl}" alt="" width="120" style="vertical-align:top;margin-right:12px;">
-          <strong>${escapeHtml(book.title)}</strong><br>
-          ${authorLine ? `by ${escapeHtml(authorLine)}<br>` : ''}
-          ${book.publish_date ? `Published: ${escapeHtml(book.publish_date)}<br>` : ''}
-          ${book.number_of_pages ? `${book.number_of_pages} pages<br>` : ''}
-        </p>
-        ${description ? `<p>${escapeHtml(description)}</p>` : ''}
-      `;
-    }
-
     async function renderCurrentBook() {
       const el = document.getElementById('current-book');
-      const results = await Promise.allSettled(CURRENT_BOOK_ISBNS.map(fetchBookDetailsHtml));
-      const slides = results.filter(r => r.status === 'fulfilled').map(r => r.value);
 
-      if (slides.length === 0) {
-        el.innerHTML = "<p>Couldn't load book details.</p>";
-        return;
+      let coverImages = [];
+      try {
+        const res = await fetch(`${BOOK_COVERS_DIR}/manifest.json`);
+        if (res.ok) {
+          const files = await res.json();
+          coverImages = files.map((f) => `${BOOK_COVERS_DIR}/${f}`);
+        }
+      } catch {
+        // manifest missing or unreadable — fall back to no cover image
       }
 
-      let index = 0;
-      el.innerHTML = slides[0];
+      el.innerHTML = `
+        <p>
+          ${coverImages.length ? `<img id="book-cover-img" src="${coverImages[0]}" alt="" width="120" style="vertical-align:top;margin-right:12px;">` : ''}
+          <strong>${escapeHtml(CURRENT_BOOK.title)}</strong><br>
+          by ${escapeHtml(CURRENT_BOOK.author)}<br>
+          ${CURRENT_BOOK.pages} pages
+        </p>
+      `;
 
-      if (slides.length > 1) {
+      if (coverImages.length > 1) {
+        const img = document.getElementById('book-cover-img');
+        let index = 0;
         setInterval(() => {
-          index = (index + 1) % slides.length;
-          el.innerHTML = slides[index];
+          index = (index + 1) % coverImages.length;
+          img.src = coverImages[index];
         }, BOOK_CYCLE_INTERVAL_MS);
       }
     }
@@ -237,6 +215,7 @@
           clearIdentity();
           renderAuthWidget();
           renderComposer();
+          renderAvailability();
         });
       } else {
         widget.innerHTML = `
@@ -261,6 +240,74 @@
         el.innerHTML = `<p>Join the club or log in to join the discussion.</p>`;
       }
     }
+
+    async function renderAvailability() {
+      const el = document.getElementById('availability');
+      const identity = getIdentity();
+      if (!identity) {
+        el.innerHTML = '<p>Join the club or log in to set your availability.</p>';
+        return;
+      }
+
+      el.innerHTML = '<p>Loading...</p>';
+      let dates = [];
+      try {
+        const doc = await db.collection('bookclub_availability').doc(identity.id).get();
+        if (doc.exists) dates = doc.data().dates || [];
+      } catch {
+        // couldn't load existing availability — start from empty
+      }
+      dates.sort();
+
+      el.innerHTML = `
+        <p>
+          <input type="date" id="availability-date-input">
+          <button id="availability-add">Add date</button>
+        </p>
+        <ul id="availability-list"></ul>
+      `;
+
+      function renderList() {
+        const list = document.getElementById('availability-list');
+        if (dates.length === 0) {
+          list.innerHTML = '<li>No dates added yet.</li>';
+          return;
+        }
+        list.innerHTML = '';
+        dates.forEach((date) => {
+          const li = document.createElement('li');
+          li.innerHTML = `${escapeHtml(date)} <button data-date="${escapeHtml(date)}">remove</button>`;
+          li.querySelector('button').addEventListener('click', () => {
+            dates = dates.filter((d) => d !== date);
+            saveAvailability();
+            renderList();
+          });
+          list.appendChild(li);
+        });
+      }
+      renderList();
+
+      function saveAvailability() {
+        db.collection('bookclub_availability').doc(identity.id).set({
+          memberId: identity.id,
+          name: identity.name,
+          dates,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      document.getElementById('availability-add').addEventListener('click', () => {
+        const input = document.getElementById('availability-date-input');
+        const date = input.value;
+        if (!date || dates.includes(date)) return;
+        dates.push(date);
+        dates.sort();
+        input.value = '';
+        saveAvailability();
+        renderList();
+      });
+    }
+    renderAvailability();
 
     function submitComment() {
       const identity = getIdentity();
@@ -302,10 +349,47 @@
       });
     });
 
+    let membersById = {};
+    let availabilityDocs = [];
+
+    function renderBestDates() {
+      const el = document.getElementById('best-dates');
+      const tally = {};
+      availabilityDocs.forEach((a) => {
+        const member = membersById[a.memberId];
+        if (!member) return;
+        (a.dates || []).forEach((date) => {
+          if (!tally[date]) tally[date] = [];
+          tally[date].push(member);
+        });
+      });
+
+      const sortedDates = Object.keys(tally).sort((a, b) => {
+        const diff = tally[b].length - tally[a].length;
+        return diff !== 0 ? diff : a.localeCompare(b);
+      });
+
+      if (sortedDates.length === 0) {
+        el.innerHTML = '<p>No availability submitted yet.</p>';
+        return;
+      }
+
+      el.innerHTML = sortedDates.map((date) => {
+        const people = tally[date];
+        const avatars = people.map((p) => `<img src="${p.avatar}" alt="" title="${escapeHtml(p.name)}" style="${AVATAR_STYLE}">`).join('');
+        return `
+          <p>
+            <strong>${escapeHtml(date)}</strong> - ${people.length} available<br>
+            Available: ${avatars}
+          </p>`;
+      }).join('');
+    }
+
     db.collection('bookclub_members').orderBy('createdAt', 'desc').onSnapshot((snapshot) => {
       const row = document.getElementById('members-row');
       const countEl = document.getElementById('members-count');
       row.innerHTML = '';
+      membersById = {};
       snapshot.docs.slice(0, 20).forEach((doc) => {
         const m = doc.data();
         const img = document.createElement('img');
@@ -315,9 +399,18 @@
         img.style = AVATAR_STYLE;
         row.appendChild(img);
       });
+      snapshot.forEach((doc) => {
+        membersById[doc.id] = doc.data();
+      });
       countEl.textContent = snapshot.size === 0
         ? 'No members yet - be the first to join.'
         : `${snapshot.size} member${snapshot.size === 1 ? '' : 's'} have joined`;
+      renderBestDates();
+    });
+
+    db.collection('bookclub_availability').onSnapshot((snapshot) => {
+      availabilityDocs = snapshot.docs.map((doc) => ({ memberId: doc.id, ...doc.data() }));
+      renderBestDates();
     });
 
     // Join form
@@ -392,6 +485,7 @@
         closeJoinForm();
         renderAuthWidget();
         renderComposer();
+        renderAvailability();
       } catch (e) {
         showJoinError("Couldn't join right now - try again.");
       } finally {
@@ -426,6 +520,7 @@
             closeLoginForm();
             renderAuthWidget();
             renderComposer();
+            renderAvailability();
           });
           loginList.appendChild(row);
         });
