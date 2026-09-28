@@ -250,6 +250,7 @@
     function renderAuthWidget() {
       const widget = document.getElementById('auth-widget');
       const identity = getIdentity();
+      document.body.style.background = identity && isModerator(identity.name) ? 'darkred' : '';
       if (identity) {
         widget.innerHTML = `
           <p>
