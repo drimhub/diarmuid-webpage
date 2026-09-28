@@ -88,6 +88,8 @@
   <h2>Members</h2>
   <p id="members-row"></p>
   <p id="members-count"></p>
+  <p><button id="play-toggle">Watch the members play</button></p>
+  <canvas id="play-canvas" width="600" height="400" class="hidden" style="border:1px solid #000;"></canvas>
 
   <h2>Discussion</h2>
   <div id="composer"></div>
@@ -104,6 +106,7 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyAurvQEXDZINvBrHbMQQU3yC_9xmqQfwj0",
@@ -513,6 +516,113 @@
         : `${snapshot.size} member${snapshot.size === 1 ? '' : 's'} have joined`;
       renderBestDates();
     });
+
+    let playSimulation = null;
+
+    function togglePlay() {
+      const canvas = document.getElementById('play-canvas');
+      const btn = document.getElementById('play-toggle');
+
+      if (playSimulation) {
+        playSimulation.stop();
+        playSimulation = null;
+        canvas.classList.add('hidden');
+        btn.textContent = 'Watch the members play';
+        return;
+      }
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const radius = 24;
+      const ctx = canvas.getContext('2d');
+
+      const MODERATOR_MAX_SPEED = 6;
+      const MEMBER_MAX_SPEED = 5;
+      const CHASE_ACCEL = 0.15;
+      const FLEE_RADIUS = 150;
+      const FLEE_ACCEL = 2.5;
+
+      function clampSpeed(n, maxSpeed) {
+        const speed = Math.hypot(n.vx, n.vy);
+        if (speed > maxSpeed) {
+          n.vx = (n.vx / speed) * maxSpeed;
+          n.vy = (n.vy / speed) * maxSpeed;
+        }
+      }
+
+      const nodes = Object.values(membersById).map((m) => {
+        const img = new Image();
+        img.src = m.avatar;
+        return {
+          name: m.name,
+          img,
+          isModerator: isModerator(m.name),
+          x: radius + Math.random() * (width - radius * 2),
+          y: radius + Math.random() * (height - radius * 2),
+          vx: (Math.random() - 0.5) * 4,
+          vy: (Math.random() - 0.5) * 4,
+        };
+      });
+      const moderatorNode = nodes.find((n) => n.isModerator);
+
+      canvas.classList.remove('hidden');
+      btn.textContent = 'Stop watching';
+
+      playSimulation = d3.forceSimulation(nodes)
+        .force('collide', d3.forceCollide(radius + 2))
+        .velocityDecay(0)
+        .alphaDecay(0)
+        .on('tick', () => {
+          if (moderatorNode) {
+            let nearest = null;
+            let nearestDist = Infinity;
+            nodes.forEach((n) => {
+              if (n === moderatorNode) return;
+              const dx = n.x - moderatorNode.x;
+              const dy = n.y - moderatorNode.y;
+              const dist = Math.hypot(dx, dy) || 1;
+              if (dist < nearestDist) { nearestDist = dist; nearest = n; }
+              if (dist < FLEE_RADIUS) {
+                const push = FLEE_ACCEL * (1 - dist / FLEE_RADIUS);
+                n.vx += (dx / dist) * push;
+                n.vy += (dy / dist) * push;
+              }
+              clampSpeed(n, MEMBER_MAX_SPEED);
+            });
+            if (nearest) {
+              const dx = nearest.x - moderatorNode.x;
+              const dy = nearest.y - moderatorNode.y;
+              const dist = Math.hypot(dx, dy) || 1;
+              moderatorNode.vx += (dx / dist) * CHASE_ACCEL;
+              moderatorNode.vy += (dy / dist) * CHASE_ACCEL;
+            }
+            clampSpeed(moderatorNode, MODERATOR_MAX_SPEED);
+          }
+
+          nodes.forEach((n) => {
+            if (n.x - radius < 0) { n.x = radius; n.vx = Math.abs(n.vx); }
+            if (n.x + radius > width) { n.x = width - radius; n.vx = -Math.abs(n.vx); }
+            if (n.y - radius < 0) { n.y = radius; n.vy = Math.abs(n.vy); }
+            if (n.y + radius > height) { n.y = height - radius; n.vy = -Math.abs(n.vy); }
+          });
+
+          ctx.clearRect(0, 0, width, height);
+          nodes.forEach((n) => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.drawImage(n.img, n.x - radius, n.y - radius, radius * 2, radius * 2);
+            ctx.restore();
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+            ctx.strokeStyle = n.isModerator ? 'red' : '#000';
+            ctx.lineWidth = n.isModerator ? 3 : 1;
+            ctx.stroke();
+          });
+        });
+    }
+    document.getElementById('play-toggle').addEventListener('click', togglePlay);
 
     db.collection('bookclub_availability').onSnapshot((snapshot) => {
       availabilityDocs = snapshot.docs.map((doc) => ({ memberId: doc.id, ...doc.data() }));
