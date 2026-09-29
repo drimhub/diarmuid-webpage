@@ -38,17 +38,20 @@
 
   const CSS = `
     .bc-reactions { display: block; margin-top: 4px; font-size: 14px; font-weight: normal; color: #000; }
-    .bc-reactions button { font: inherit; cursor: pointer; }
-    .bc-pill, .bc-add { display: inline-block; margin: 0 4px 4px 0; padding: 1px 8px; border: 1px solid #999; border-radius: 12px; background: #f2f2f2; color: #000; }
+    .bc-reactions button { font: inherit; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    .bc-pill, .bc-add { display: inline-block; min-height: 40px; margin: 0 6px 6px 0; padding: 4px 12px; border: 1px solid #999; border-radius: 20px; background: #f2f2f2; color: #000; font-size: 16px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+    .bc-add { min-width: 40px; }
     .bc-pill.bc-mine { background: #cfe8ff; border-color: #4a90d9; }
     .bc-pill.bc-locked { cursor: default; }
-    .bc-who-link { margin-left: 4px; padding: 0; border: none; background: none; color: inherit; text-decoration: underline; font-size: 12px; }
-    .bc-picker { position: fixed; z-index: 1100; display: flex; gap: 4px; padding: 6px; background: #fff; border: 1px solid #999; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-    .bc-picker button { padding: 2px 6px; font-size: 20px; border: none; border-radius: 6px; background: none; cursor: pointer; }
-    .bc-picker button:hover { background: #eee; }
+    .bc-note { margin-left: 6px; font-size: 13px; }
+    .bc-who-link { min-height: 40px; margin-left: 2px; padding: 8px; border: none; background: none; color: inherit; text-decoration: underline; font-size: 14px; }
+    .bc-picker { position: fixed; z-index: 1100; display: grid; grid-template-columns: repeat(4, 48px); gap: 4px; padding: 6px; background: #fff; border: 1px solid #999; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    .bc-picker button { width: 48px; height: 48px; padding: 0; font-size: 26px; border: none; border-radius: 8px; background: none; cursor: pointer; touch-action: manipulation; }
+    @media (hover: hover) { .bc-picker button:hover { background: #eee; } }
     .bc-who-overlay { position: fixed; inset: 0; z-index: 1050; background: rgba(0,0,0,0.6); }
-    .bc-who-box { max-width: 340px; max-height: 70vh; overflow-y: auto; margin: 60px auto; padding: 16px; background: #fff; color: #000; }
-    .bc-who-tabs button { margin: 0 4px 6px 0; padding: 1px 8px; border: 1px solid #999; border-radius: 12px; background: #f2f2f2; cursor: pointer; }
+    .bc-who-box { box-sizing: border-box; width: calc(100% - 24px); max-width: 340px; max-height: 70vh; max-height: 70dvh; overflow-y: auto; overscroll-behavior: contain; margin: 40px auto; padding: 16px; background: #fff; color: #000; }
+    .bc-who-box .bc-who-close { min-height: 40px; padding: 4px 24px; }
+    .bc-who-tabs button { min-height: 36px; margin: 0 6px 6px 0; padding: 4px 12px; border: 1px solid #999; border-radius: 20px; background: #f2f2f2; cursor: pointer; touch-action: manipulation; }
     .bc-who-tabs button.bc-active { background: #cfe8ff; border-color: #4a90d9; }
     .bc-who-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
     .bc-who-row .bc-who-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: #ccc; flex: none; }
@@ -68,10 +71,30 @@
 
   // ---- writes ----------------------------------------------------------
 
-  async function toggle(targetId, key) {
+  // Brief inline message inside a bar (e.g. when a locked reaction is clicked).
+  function flashNote(bar, message) {
+    if (!bar) return;
+    bar.querySelectorAll('.bc-note').forEach((n) => n.remove());
+    const note = document.createElement('small');
+    note.className = 'bc-note';
+    note.textContent = message;
+    bar.appendChild(note);
+    setTimeout(() => note.remove(), 2500);
+  }
+
+  function requireLogin(bar) {
+    flashNote(bar, 'Log in or join the club (top of the page) to react.');
+  }
+
+  async function toggle(targetId, key, bar) {
     const me = ctx.getIdentity();
-    if (!me) { ctx.onLoginRequired(); return; }
-    if (!allowedKeys(me).includes(key)) return;
+    if (!me) { requireLogin(bar); return; }
+    if (!allowedKeys(me).includes(key)) {
+      flashNote(bar, key === 'robot'
+        ? `Only the Moderator can use ${REACTIONS.robot}.`
+        : `The Moderator can only react with ${REACTIONS.robot}.`);
+      return;
+    }
 
     const id = [targetId, me.id, key].join(ID_SEP);
     const ref = ctx.db.collection(COLLECTION).doc(id);
@@ -169,7 +192,7 @@
 
   function openPicker(button, targetId) {
     const me = ctx.getIdentity();
-    if (!me) { ctx.onLoginRequired(); return; }
+    if (!me) { requireLogin(button.closest('.bc-reactions')); return; }
     closePicker();
 
     const el = document.createElement('div');
@@ -211,8 +234,8 @@
     return overlay;
   }
 
-  function openWho(targetId) {
-    who = { targetId, filter: 'all' };
+  function openWho(targetId, filter = 'all') {
+    who = { targetId, filter };
     ensureWhoModal().style.display = 'block';
     renderWho();
   }
@@ -280,13 +303,52 @@
 
   // ---- wiring ----------------------------------------------------------
 
+  // Touch: pressing and holding a pill opens the who-reacted list filtered to that
+  // emoji (there is no hover tooltip on phones). The click that follows the press is swallowed.
+  const LONG_PRESS_MS = 500;
+  const LONG_PRESS_SLOP_PX = 10;
+  let pressTimer = null;
+  let pressStart = null;
+  let swallowClick = false;
+
+  function cancelPress() {
+    clearTimeout(pressTimer);
+    pressTimer = null;
+    pressStart = null;
+  }
+
+  function onPointerDown(e) {
+    if (e.pointerType === 'mouse') return;
+    const pill = e.target.closest('.bc-pill');
+    if (!pill) return;
+    cancelPress();
+    pressStart = { x: e.clientX, y: e.clientY };
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      swallowClick = true;
+      openWho(pill.closest('.bc-reactions').dataset.targetId, pill.dataset.key);
+    }, LONG_PRESS_MS);
+  }
+
+  function onPointerMove(e) {
+    if (!pressStart) return;
+    if (Math.hypot(e.clientX - pressStart.x, e.clientY - pressStart.y) > LONG_PRESS_SLOP_PX) cancelPress();
+  }
+
+  function onPointerEnd() {
+    cancelPress();
+    // The click (if any) fires right after pointerup; don't let a stale flag eat a later tap.
+    if (swallowClick) setTimeout(() => { swallowClick = false; }, 400);
+  }
+
   function onDocumentClick(e) {
+    if (swallowClick) { swallowClick = false; return; }
     if (picker && !picker.el.contains(e.target) && e.target !== picker.button) closePicker();
 
     const bar = e.target.closest('.bc-reactions');
     if (!bar) return;
     const targetId = bar.dataset.targetId;
-    if (e.target.closest('.bc-pill')) toggle(targetId, e.target.closest('.bc-pill').dataset.key);
+    if (e.target.closest('.bc-pill')) toggle(targetId, e.target.closest('.bc-pill').dataset.key, bar);
     else if (e.target.closest('.bc-add')) openPicker(e.target.closest('.bc-add'), targetId);
     else if (e.target.closest('.bc-who-link')) openWho(targetId);
   }
@@ -299,6 +361,18 @@
     document.head.appendChild(style);
 
     document.addEventListener('click', onDocumentClick);
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerEnd);
+    document.addEventListener('pointercancel', onPointerEnd);
+    // Suppress the long-press context menu / callout on pills.
+    document.addEventListener('contextmenu', (e) => {
+      if (e.target.closest && e.target.closest('.bc-pill')) e.preventDefault();
+    });
+    // A fixed picker would drift away from its bar while scrolling.
+    window.addEventListener('scroll', (e) => {
+      if (picker && !picker.el.contains(e.target)) closePicker();
+    }, { capture: true, passive: true });
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       closePicker();

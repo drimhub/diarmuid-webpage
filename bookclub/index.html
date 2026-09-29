@@ -89,7 +89,7 @@
   <p id="members-row"></p>
   <p id="members-count"></p>
   <p data-react-id="feature:play"><button id="play-toggle">Watch the members play</button></p>
-  <canvas id="play-canvas" width="600" height="400" class="hidden" style="border:1px solid #000;"></canvas>
+  <canvas id="play-canvas" width="600" height="400" class="hidden" style="border:1px solid #000;max-width:100%;height:auto;"></canvas>
 
   <h2>Discussion</h2>
   <div id="composer"></div>
@@ -526,6 +526,7 @@
         ? 'No members yet - be the first to join.'
         : `${snapshot.size} member${snapshot.size === 1 ? '' : 's'} have joined`;
       renderBestDates();
+      if (window.BookclubReactions) BookclubReactions.refresh();
     });
 
     let playSimulation = null;
@@ -774,10 +775,6 @@
         getIdentity,
         isModerator,
         getMembers: () => membersById,
-        onLoginRequired: () => {
-          document.getElementById('auth-widget').scrollIntoView({ behavior: 'smooth' });
-          alert('Join the club or log in to react.');
-        },
       });
     } catch (e) {
       console.error('Reactions unavailable', e);

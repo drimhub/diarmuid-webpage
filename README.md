@@ -49,13 +49,14 @@ Target ID kinds in use:
 | `avatar` | `avatar:<memberId>` | Profile picture in the profile modal only |
 | `bio` | `bio:<memberId>` | Bio in the profile modal only |
 
+- Mobile: pills and buttons are sized for touch, the picker is a 4-column grid that closes on scroll, and pressing and holding a pill (touch only) opens the who-reacted list filtered to that emoji, since phones have no hover tooltip.
 - Palette: 👍 ❤️ 😂 🔥 📚 😮 😢 🎉. The 🤖 reaction is Moderator-only, and the Moderator can use nothing else.
 - Storage: one doc per (target, member, reaction) in `bookclub_reactions`, id `<targetId>__<memberId>__<reaction>`, with `createdAt` set by the server. Clicking a reaction you already made deletes the doc.
 - Avatars are not stored on reactions; the "who?" modal looks them up from the members list.
 
 ### Firestore rules
 
-Rules live in `firestore.rules` (the old wide-open rule is gone; only the listed collections are reachable). Existing collections are still open read/write; only `bookclub_reactions` is validated. To deploy:
+Rules live in `firestore.rules` (the old wide-open rule is gone; only the listed collections are reachable). Existing collections are still open read/write; only `bookclub_reactions` is validated (emoji whitelist, Moderator-only 🤖, server timestamp, and the reacting member must exist and match the stored name). Logging in as any member, including the Moderator, is intentional, so the rules are guard rails rather than identity checks. To deploy:
 
 ```
 npm install -g firebase-tools   # once

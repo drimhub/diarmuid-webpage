@@ -39,10 +39,14 @@ service cloud.firestore {
       return d.keys().hasOnly(['targetId', 'targetKind', 'memberId', 'name', 'reaction', 'createdAt'])
         && d.keys().hasAll(['targetId', 'targetKind', 'memberId', 'name', 'reaction', 'createdAt'])
         && d.targetId is string && d.targetId.size() <= 200
-        && d.targetKind is string
+        && d.targetKind is string && d.targetKind.matches('^[a-z]+$')
         && d.targetId.matches('^' + d.targetKind + ':[A-Za-z0-9_-]+$')
-        && d.memberId is string && d.memberId.size() > 0 && d.memberId.size() <= 100
+        && d.memberId is string && d.memberId.matches('^[A-Za-z0-9]{1,100}$')
         && d.name is string && d.name.size() > 0 && d.name.size() <= 40
+        // Must be a real member, reacting under that member's own name. This stops
+        // made-up ids, but it is not proof of identity (anyone can log in as anyone).
+        && exists(/databases/$(database)/documents/bookclub_members/$(d.memberId))
+        && get(/databases/$(database)/documents/bookclub_members/$(d.memberId)).data.name == d.name
         && d.reaction in ['thumbsup', 'heart', 'laugh', 'fire', 'book', 'wow', 'sad', 'party', 'robot']
         // The robot is the Moderator's reaction, and the Moderator can only use the robot.
         && ((d.reaction == 'robot') == (d.name == 'Moderator'))
