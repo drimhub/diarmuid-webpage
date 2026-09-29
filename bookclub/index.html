@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bookclub - Diarmuid's Site</title>
+  <style>
+    body {
+      position: relative;
+      margin: 0;
+      padding: 10px;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: url("/assets/gang.jpg");
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      opacity: 0.1;
+      z-index: -1;
+    }
+    .hidden { display: none; }
+    .comment { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <p><a href="/">&larr; Back home</a></p>
+  <h1>Bookclub</h1>
+
+  <h2>Currently Reading</h2>
+  <div id="current-book"><p>Loading...</p></div>
+
+  <div id="auth-widget"></div>
+
+  <div id="join-form" class="hidden">
+    <h3>Join the book club</h3>
+    <p>
+      <label>Your name<br>
+        <input type="text" id="join-name" maxlength="40">
+      </label>
+    </p>
+    <p>
+      <label>Profile picture<br>
+        <input type="file" id="join-avatar" accept="image/*">
+      </label>
+    </p>
+    <div id="join-avatar-preview"></div>
+    <p>
+      <label>Bio (optional)<br>
+        <textarea id="join-bio" maxlength="280" rows="3" style="width:300px;"></textarea>
+      </label>
+    </p>
+    <p id="join-error" class="hidden" style="color:red;"></p>
+    <p>
+      <button id="join-submit">Join</button>
+      <button id="join-cancel">Cancel</button>
+    </p>
+  </div>
+
+  <div id="login-form" class="hidden">
+    <h3>Log in</h3>
+    <p>Choose your name:</p>
+    <div id="login-list"></div>
+    <p id="login-empty" class="hidden">No one's joined yet - be the first!</p>
+    <p><button id="login-cancel">Cancel</button></p>
+  </div>
+
+  <div id="profile-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;">
+    <div style="background:white;padding:20px;max-width:280px;margin:80px auto;text-align:center;">
+      <img id="profile-modal-img" src="" alt="" style="max-width:100%;border-radius:8px;">
+      <p id="profile-modal-name" style="font-weight:bold;"></p>
+      <p id="profile-modal-bio"></p>
+      <button id="profile-modal-close">Close</button>
+    </div>
+  </div>
+
+  <h2>Edit Bio</h2>
+  <div id="edit-bio"></div>
+
+  <h2>My Availability</h2>
+  <div id="availability"></div>
+
+  <h2>Best Dates</h2>
+  <div id="best-dates"></div>
+
+  <h2>Members</h2>
+  <p id="members-row"></p>
+  <p id="members-count"></p>
+  <p><button id="play-toggle">Watch the members play</button></p>
+  <canvas id="play-canvas" width="600" height="400" class="hidden" style="border:1px solid #000;"></canvas>
+
+  <h2>Discussion</h2>
+  <div id="composer"></div>
+  <div id="comment-feed"></div>
+
+  <!-- BEGIN AADS AD UNIT 2455284 -->
+
+<div id="frame" style="width: 100%;margin: auto;position: relative; z-index: 99998;">
+          <iframe data-aa='2455284' src='//acceptable.a-ads.com/2455284/?size=Adaptive'
+                            style='border:0; padding:0; width:70%; height:auto; overflow:hidden;display: block;margin: auto'></iframe>
+        </div>
+
+<!-- END AADS AD UNIT 2455284 -->
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAurvQEXDZINvBrHbMQQU3yC_9xmqQfwj0",
+      authDomain: "diarmuid-webpage.firebaseapp.com",
+      projectId: "diarmuid-webpage",
+      storageBucket: "diarmuid-webpage.firebasestorage.app",
+      messagingSenderId: "234273109755",
+      appId: "1:234273109755:web:45996e94fdca4ad520225e"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const IDENTITY_KEY = 'bookclubMember';
+    const AVATAR_STYLE = 'width:32px;height:32px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px;';
+    const CURRENT_BOOK = {
+      title: "The Goalkeeper's Fear of the Penalty Kick",
+      author: 'Peter Handke',
+      pages: 96,
+    };
+    const BOOK_COVERS_DIR = '/assets/book-covers';
+    const BOOK_CYCLE_INTERVAL_MS = 3000;
+
+    function isModerator(name) {
+      return name === 'Moderator';
+    }
+
+    function openProfileModal(name, avatar, bio) {
+      document.getElementById('profile-modal-img').src = avatar;
+      document.getElementById('profile-modal-name').textContent = name;
+      document.getElementById('profile-modal-bio').textContent = bio || '';
+      document.getElementById('profile-modal').classList.remove('hidden');
+    }
+    function closeProfileModal() {
+      document.getElementById('profile-modal').classList.add('hidden');
+    }
+    document.getElementById('profile-modal-close').addEventListener('click', closeProfileModal);
+    document.getElementById('profile-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'profile-modal') closeProfileModal();
+    });
+    document.getElementById('best-dates').addEventListener('click', (e) => {
+      if (e.target.tagName === 'IMG') openProfileModal(e.target.title, e.target.src, e.target.dataset.bio);
+    });
+    document.getElementById('members-row').addEventListener('click', (e) => {
+      if (e.target.tagName === 'IMG') openProfileModal(e.target.title, e.target.src, e.target.dataset.bio);
+    });
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    }
+
+    function getIdentity() {
+      try {
+        return JSON.parse(localStorage.getItem(IDENTITY_KEY));
+      } catch {
+        return null;
+      }
+    }
+    function setIdentity(member) {
+      localStorage.setItem(IDENTITY_KEY, JSON.stringify(member));
+    }
+    function clearIdentity() {
+      localStorage.removeItem(IDENTITY_KEY);
+    }
+
+    function defaultAvatar(name) {
+      const initials = name.trim().split(/\s+/).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+      let hash = 0;
+      for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+      const hue = Math.abs(hash) % 360;
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = `hsl(${hue}, 60%, 55%)`;
+      ctx.beginPath();
+      ctx.arc(64, 64, 64, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 56px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(initials, 64, 68);
+      return canvas.toDataURL('image/png');
+    }
+
+    function resizeImageFile(file, maxDim = 200, quality = 0.82) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            let { width, height } = img;
+            const scale = Math.min(1, maxDim / Math.max(width, height));
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          };
+          img.onerror = () => reject(new Error('Could not read image'));
+          img.src = e.target.result;
+        };
+        reader.onerror = () => reject(new Error('Could not read file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function renderCurrentBook() {
+      const el = document.getElementById('current-book');
+
+      let coverImages = [];
+      try {
+        const res = await fetch(`${BOOK_COVERS_DIR}/manifest.json`);
+        if (res.ok) {
+          const files = await res.json();
+          coverImages = files.map((f) => `${BOOK_COVERS_DIR}/${f}`);
+        }
+      } catch {
+        // manifest missing or unreadable — fall back to no cover image
+      }
+
+      el.innerHTML = `
+        <p>
+          ${coverImages.length ? `<img id="book-cover-img" src="${coverImages[0]}" alt="" width="120" style="vertical-align:top;margin-right:12px;">` : ''}
+          <strong>${escapeHtml(CURRENT_BOOK.title)}</strong><br>
+          by ${escapeHtml(CURRENT_BOOK.author)}<br>
+          ${CURRENT_BOOK.pages} pages
+        </p>
+      `;
+
+      if (coverImages.length > 1) {
+        const img = document.getElementById('book-cover-img');
+        let index = 0;
+        setInterval(() => {
+          index = (index + 1) % coverImages.length;
+          img.src = coverImages[index];
+        }, BOOK_CYCLE_INTERVAL_MS);
+      }
+    }
+    renderCurrentBook();
+
+    function renderAuthWidget() {
+      const widget = document.getElementById('auth-widget');
+      const identity = getIdentity();
+      document.body.style.background = identity && isModerator(identity.name) ? 'darkred' : '';
+      if (identity) {
+        widget.innerHTML = `
+          <p>
+            <img src="${identity.avatar}" alt="" style="${AVATAR_STYLE}">
+            Logged in as <strong>${escapeHtml(identity.name)}</strong>
+            (<a href="#" id="switch-link">switch</a>)
+          </p>`;
+        document.getElementById('switch-link').addEventListener('click', (e) => {
+          e.preventDefault();
+          clearIdentity();
+          renderAuthWidget();
+          renderComposer();
+          renderEditBio();
+          renderAvailability();
+        });
+      } else {
+        widget.innerHTML = `
+          <p>
+            <button id="open-join">Join the club</button>
+            <button id="open-login">Log in</button>
+          </p>`;
+        document.getElementById('open-join').addEventListener('click', openJoinForm);
+        document.getElementById('open-login').addEventListener('click', openLoginForm);
+      }
+    }
+
+    function renderComposer() {
+      const el = document.getElementById('composer');
+      const identity = getIdentity();
+      if (identity) {
+        el.innerHTML = `
+          <textarea id="comment-text" placeholder="Say something nice..." maxlength="500" rows="3" style="width:300px;"></textarea><br>
+          <button id="comment-submit">Post</button>`;
+        document.getElementById('comment-submit').addEventListener('click', submitComment);
+      } else {
+        el.innerHTML = `<p>Join the club or log in to join the discussion.</p>`;
+      }
+    }
+
+    async function renderEditBio() {
+      const el = document.getElementById('edit-bio');
+      const identity = getIdentity();
+      if (!identity) {
+        el.innerHTML = '<p>Join the club or log in to set your bio.</p>';
+        return;
+      }
+
+      el.innerHTML = '<p>Loading...</p>';
+      let bio = '';
+      try {
+        const doc = await db.collection('bookclub_members').doc(identity.id).get();
+        if (doc.exists) bio = doc.data().bio || '';
+      } catch {
+        // couldn't load existing bio — start from empty
+      }
+
+      el.innerHTML = `
+        <p>
+          <textarea id="bio-input" maxlength="280" rows="3" style="width:300px;">${escapeHtml(bio)}</textarea>
+        </p>
+        <p>
+          <button id="bio-save">Save</button>
+          <span id="bio-saved" class="hidden">Saved!</span>
+        </p>
+      `;
+
+      document.getElementById('bio-save').addEventListener('click', async () => {
+        const newBio = document.getElementById('bio-input').value.trim();
+        const saveBtn = document.getElementById('bio-save');
+        const savedMsg = document.getElementById('bio-saved');
+        saveBtn.disabled = true;
+        savedMsg.classList.add('hidden');
+        try {
+          await db.collection('bookclub_members').doc(identity.id).update({ bio: newBio });
+          savedMsg.classList.remove('hidden');
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+    }
+    renderEditBio();
+
+    async function renderAvailability() {
+      const el = document.getElementById('availability');
+      const identity = getIdentity();
+      if (!identity) {
+        el.innerHTML = '<p>Join the club or log in to set your availability.</p>';
+        return;
+      }
+
+      el.innerHTML = '<p>Loading...</p>';
+      let dates = [];
+      try {
+        const doc = await db.collection('bookclub_availability').doc(identity.id).get();
+        if (doc.exists) dates = doc.data().dates || [];
+      } catch {
+        // couldn't load existing availability — start from empty
+      }
+      dates.sort();
+
+      el.innerHTML = `
+        <p>
+          <input type="date" id="availability-date-input">
+          <button id="availability-add">Add date</button>
+        </p>
+        <ul id="availability-list"></ul>
+      `;
+
+      function renderList() {
+        const list = document.getElementById('availability-list');
+        if (dates.length === 0) {
+          list.innerHTML = '<li>No dates added yet.</li>';
+          return;
+        }
+        list.innerHTML = '';
+        dates.forEach((date) => {
+          const li = document.createElement('li');
+          li.innerHTML = `${escapeHtml(date)} <button data-date="${escapeHtml(date)}">remove</button>`;
+          li.querySelector('button').addEventListener('click', () => {
+            dates = dates.filter((d) => d !== date);
+            saveAvailability();
+            renderList();
+          });
+          list.appendChild(li);
+        });
+      }
+      renderList();
+
+      function saveAvailability() {
+        db.collection('bookclub_availability').doc(identity.id).set({
+          memberId: identity.id,
+          name: identity.name,
+          dates,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      document.getElementById('availability-add').addEventListener('click', () => {
+        const input = document.getElementById('availability-date-input');
+        const date = input.value;
+        if (!date || dates.includes(date)) return;
+        dates.push(date);
+        dates.sort();
+        input.value = '';
+        saveAvailability();
+        renderList();
+      });
+    }
+    renderAvailability();
+
+    function submitComment() {
+      const identity = getIdentity();
+      if (!identity) return;
+      const textEl = document.getElementById('comment-text');
+      const text = textEl.value.trim();
+      if (!text) return;
+      const btn = document.getElementById('comment-submit');
+      btn.disabled = true;
+      db.collection('bookclub_comments').add({
+        memberId: identity.id,
+        name: identity.name,
+        avatar: identity.avatar,
+        text,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      }).then(() => {
+        textEl.value = '';
+      }).finally(() => {
+        btn.disabled = false;
+      });
+    }
+
+    db.collection('bookclub_comments').orderBy('timestamp', 'desc').onSnapshot((snapshot) => {
+      const feed = document.getElementById('comment-feed');
+      if (snapshot.empty) {
+        feed.innerHTML = '<p>No comments yet - be the first to say something.</p>';
+        return;
+      }
+      feed.innerHTML = '';
+      snapshot.forEach((doc) => {
+        const c = doc.data();
+        const when = c.timestamp ? c.timestamp.toDate().toLocaleString() : 'just now';
+        const entry = document.createElement('div');
+        entry.className = 'comment';
+        if (isModerator(c.name)) {
+          entry.style.fontWeight = 'bold';
+          entry.style.background = 'black';
+          entry.style.color = 'white';
+          entry.style.padding = '6px';
+        }
+        entry.innerHTML = `
+          <img src="${c.avatar}" alt="" style="${AVATAR_STYLE}">
+          <strong class="comment-name" style="cursor:pointer;text-decoration:underline;">${escapeHtml(c.name)}</strong> ${escapeHtml(c.text)} <small>${when}</small>`;
+        entry.querySelector('.comment-name').addEventListener('click', () => {
+          const member = membersById[c.memberId];
+          openProfileModal(c.name, c.avatar, member ? member.bio : '');
+        });
+        feed.appendChild(entry);
+      });
+    });
+
+    let membersById = {};
+    let availabilityDocs = [];
+
+    function renderBestDates() {
+      const el = document.getElementById('best-dates');
+      const tally = {};
+      availabilityDocs.forEach((a) => {
+        const member = membersById[a.memberId];
+        if (!member) return;
+        (a.dates || []).forEach((date) => {
+          if (!tally[date]) tally[date] = [];
+          tally[date].push(member);
+        });
+      });
+
+      const sortedDates = Object.keys(tally).sort((a, b) => {
+        const diff = tally[b].length - tally[a].length;
+        return diff !== 0 ? diff : a.localeCompare(b);
+      });
+
+      if (sortedDates.length === 0) {
+        el.innerHTML = '<p>No availability submitted yet.</p>';
+        return;
+      }
+
+      el.innerHTML = sortedDates.map((date) => {
+        const people = tally[date];
+        const avatars = people.map((p) => `<img src="${p.avatar}" alt="" title="${escapeHtml(p.name)}" data-bio="${escapeHtml(p.bio || '')}" style="${AVATAR_STYLE}cursor:pointer;">`).join('');
+        return `
+          <p>
+            <strong>${escapeHtml(date)}</strong> - ${people.length} available<br>
+            Available: ${avatars}
+          </p>`;
+      }).join('');
+    }
+
+    db.collection('bookclub_members').orderBy('createdAt', 'desc').onSnapshot((snapshot) => {
+      const row = document.getElementById('members-row');
+      const countEl = document.getElementById('members-count');
+      row.innerHTML = '';
+      membersById = {};
+      snapshot.docs.slice(0, 20).forEach((doc) => {
+        const m = doc.data();
+        const img = document.createElement('img');
+        img.src = m.avatar;
+        img.alt = m.name;
+        img.title = m.name;
+        img.dataset.bio = m.bio || '';
+        img.style = `${AVATAR_STYLE}cursor:pointer;`;
+        row.appendChild(img);
+      });
+      snapshot.forEach((doc) => {
+        membersById[doc.id] = doc.data();
+      });
+      countEl.textContent = snapshot.size === 0
+        ? 'No members yet - be the first to join.'
+        : `${snapshot.size} member${snapshot.size === 1 ? '' : 's'} have joined`;
+      renderBestDates();
+    });
+
+    let playSimulation = null;
+
+    function togglePlay() {
+      const canvas = document.getElementById('play-canvas');
+      const btn = document.getElementById('play-toggle');
+
+      if (playSimulation) {
+        playSimulation.stop();
+        playSimulation = null;
+        canvas.classList.add('hidden');
+        btn.textContent = 'Watch the members play';
+        return;
+      }
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const radius = 24;
+      const ctx = canvas.getContext('2d');
+
+      const MODERATOR_MAX_SPEED = 6;
+      const MEMBER_MAX_SPEED = 5;
+      const CHASE_ACCEL = 0.15;
+      const FLEE_RADIUS = 150;
+      const FLEE_ACCEL = 2.5;
+
+      function clampSpeed(n, maxSpeed) {
+        const speed = Math.hypot(n.vx, n.vy);
+        if (speed > maxSpeed) {
+          n.vx = (n.vx / speed) * maxSpeed;
+          n.vy = (n.vy / speed) * maxSpeed;
+        }
+      }
+
+      const nodes = Object.values(membersById).map((m) => {
+        const img = new Image();
+        img.src = m.avatar;
+        return {
+          name: m.name,
+          img,
+          isModerator: isModerator(m.name),
+          x: radius + Math.random() * (width - radius * 2),
+          y: radius + Math.random() * (height - radius * 2),
+          vx: (Math.random() - 0.5) * 4,
+          vy: (Math.random() - 0.5) * 4,
+        };
+      });
+      const moderatorNode = nodes.find((n) => n.isModerator);
+
+      canvas.classList.remove('hidden');
+      btn.textContent = 'Stop watching';
+
+      playSimulation = d3.forceSimulation(nodes)
+        .force('collide', d3.forceCollide(radius + 2))
+        .velocityDecay(0)
+        .alphaDecay(0)
+        .on('tick', () => {
+          if (moderatorNode) {
+            let nearest = null;
+            let nearestDist = Infinity;
+            nodes.forEach((n) => {
+              if (n === moderatorNode) return;
+              const dx = n.x - moderatorNode.x;
+              const dy = n.y - moderatorNode.y;
+              const dist = Math.hypot(dx, dy) || 1;
+              if (dist < nearestDist) { nearestDist = dist; nearest = n; }
+              if (dist < FLEE_RADIUS) {
+                const push = FLEE_ACCEL * (1 - dist / FLEE_RADIUS);
+                n.vx += (dx / dist) * push;
+                n.vy += (dy / dist) * push;
+              }
+              clampSpeed(n, MEMBER_MAX_SPEED);
+            });
+            if (nearest) {
+              const dx = nearest.x - moderatorNode.x;
+              const dy = nearest.y - moderatorNode.y;
+              const dist = Math.hypot(dx, dy) || 1;
+              moderatorNode.vx += (dx / dist) * CHASE_ACCEL;
+              moderatorNode.vy += (dy / dist) * CHASE_ACCEL;
+            }
+            clampSpeed(moderatorNode, MODERATOR_MAX_SPEED);
+          }
+
+          nodes.forEach((n) => {
+            if (n.x - radius < 0) { n.x = radius; n.vx = Math.abs(n.vx); }
+            if (n.x + radius > width) { n.x = width - radius; n.vx = -Math.abs(n.vx); }
+            if (n.y - radius < 0) { n.y = radius; n.vy = Math.abs(n.vy); }
+            if (n.y + radius > height) { n.y = height - radius; n.vy = -Math.abs(n.vy); }
+          });
+
+          ctx.clearRect(0, 0, width, height);
+          nodes.forEach((n) => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.drawImage(n.img, n.x - radius, n.y - radius, radius * 2, radius * 2);
+            ctx.restore();
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+            ctx.strokeStyle = n.isModerator ? 'red' : '#000';
+            ctx.lineWidth = n.isModerator ? 3 : 1;
+            ctx.stroke();
+          });
+        });
+    }
+    document.getElementById('play-toggle').addEventListener('click', togglePlay);
+
+    db.collection('bookclub_availability').onSnapshot((snapshot) => {
+      availabilityDocs = snapshot.docs.map((doc) => ({ memberId: doc.id, ...doc.data() }));
+      renderBestDates();
+    });
+
+    // Join form
+    const joinForm = document.getElementById('join-form');
+    const joinName = document.getElementById('join-name');
+    const joinAvatarInput = document.getElementById('join-avatar');
+    const joinAvatarPreview = document.getElementById('join-avatar-preview');
+    const joinError = document.getElementById('join-error');
+    const joinSubmit = document.getElementById('join-submit');
+
+    function openJoinForm() {
+      document.getElementById('login-form').classList.add('hidden');
+      joinName.value = '';
+      joinAvatarInput.value = '';
+      joinAvatarPreview.innerHTML = '';
+      document.getElementById('join-bio').value = '';
+      joinError.classList.add('hidden');
+      joinForm.classList.remove('hidden');
+      joinName.focus();
+    }
+    function closeJoinForm() {
+      joinForm.classList.add('hidden');
+    }
+    function showJoinError(msg) {
+      joinError.textContent = msg;
+      joinError.classList.remove('hidden');
+    }
+
+    document.getElementById('join-cancel').addEventListener('click', closeJoinForm);
+
+    joinAvatarInput.addEventListener('change', async () => {
+      const file = joinAvatarInput.files[0];
+      if (!file) { joinAvatarPreview.innerHTML = ''; return; }
+      try {
+        const dataUrl = await resizeImageFile(file);
+        joinAvatarPreview.innerHTML = `<img src="${dataUrl}" alt="Preview" style="${AVATAR_STYLE}width:64px;height:64px;">`;
+      } catch {
+        joinAvatarPreview.innerHTML = '';
+      }
+    });
+
+    joinSubmit.addEventListener('click', async () => {
+      const name = joinName.value.trim();
+      joinError.classList.add('hidden');
+      if (!name) { showJoinError('Please enter a name.'); return; }
+
+      joinSubmit.disabled = true;
+      joinSubmit.textContent = 'Joining...';
+      try {
+        const nameLower = name.toLowerCase();
+        const existing = await db.collection('bookclub_members').where('nameLower', '==', nameLower).limit(1).get();
+        if (!existing.empty) {
+          showJoinError('That name is already taken - try logging in instead.');
+          return;
+        }
+
+        let avatar;
+        const file = joinAvatarInput.files[0];
+        if (file) {
+          avatar = await resizeImageFile(file);
+        } else {
+          avatar = defaultAvatar(name);
+        }
+
+        const bio = document.getElementById('join-bio').value.trim();
+        const docRef = await db.collection('bookclub_members').add({
+          name,
+          nameLower,
+          avatar,
+          bio,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+
+        setIdentity({ id: docRef.id, name, avatar });
+        closeJoinForm();
+        renderAuthWidget();
+        renderComposer();
+        renderEditBio();
+        renderAvailability();
+      } catch (e) {
+        showJoinError("Couldn't join right now - try again.");
+      } finally {
+        joinSubmit.disabled = false;
+        joinSubmit.textContent = 'Join';
+      }
+    });
+
+    // Login form
+    const loginForm = document.getElementById('login-form');
+    const loginList = document.getElementById('login-list');
+    const loginEmpty = document.getElementById('login-empty');
+
+    async function openLoginForm() {
+      joinForm.classList.add('hidden');
+      loginEmpty.classList.add('hidden');
+      loginList.innerHTML = '<p>Loading...</p>';
+      loginForm.classList.remove('hidden');
+      try {
+        const snap = await db.collection('bookclub_members').orderBy('name').get();
+        loginList.innerHTML = '';
+        if (snap.empty) {
+          loginEmpty.classList.remove('hidden');
+          return;
+        }
+        snap.forEach((doc) => {
+          const m = doc.data();
+          const row = document.createElement('p');
+          const moderatorStyle = isModerator(m.name) ? 'background:black;color:white;' : '';
+          row.innerHTML = `<button type="button" data-id="${doc.id}" style="${moderatorStyle}"><img src="${m.avatar}" alt="" style="${AVATAR_STYLE}">${escapeHtml(m.name)}</button>`;
+          row.querySelector('button').addEventListener('click', () => {
+            setIdentity({ id: doc.id, name: m.name, avatar: m.avatar });
+            closeLoginForm();
+            renderAuthWidget();
+            renderComposer();
+            renderEditBio();
+            renderAvailability();
+          });
+          loginList.appendChild(row);
+        });
+      } catch (e) {
+        loginList.innerHTML = "<p>Couldn't load members.</p>";
+      }
+    }
+    function closeLoginForm() {
+      loginForm.classList.add('hidden');
+    }
+    document.getElementById('login-cancel').addEventListener('click', closeLoginForm);
+
+    renderAuthWidget();
+    renderComposer();
+  </script>
+
+  <script>
+    async function checkForNewVersion() {
+      try {
+        const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
+        const { version } = await res.json();
+        const seen = localStorage.getItem('siteVersion');
+        localStorage.setItem('siteVersion', version);
+        if (seen && seen !== version) {
+          location.href = location.pathname + '?v=' + version;
+          return;
+        }
+      } catch (e) {
+        // offline or fetch blocked — nothing to do
+      }
+    }
+    checkForNewVersion();
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) checkForNewVersion();
+    });
+  </script>
+</body>
+</html>

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Diarmuid's Site</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <style>
     body {
       position: relative;
@@ -20,21 +21,43 @@
       opacity: 0.1;
       z-index: -1;
     }
+    #bookclub-banner {
+      display: inline-block;
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 9999;
+      font-weight: bold;
+      text-decoration: none;
+      color: #d1004a;
+      background: #ffe3ee;
+      border: 2px solid #d1004a;
+      border-radius: 6px;
+      padding: 6px 14px;
+      transition: top 4s ease-in-out, left 4s ease-in-out;
+    }
   </style>
 </head>
 <body>
+  <a id="bookclub-banner" href="/bookclub">NEW: bookclub</a>
   <h1>What up, this my site</h1>
 
   <section id="heat-of-the-week">
-    <h2>Heat of the Week</h2>
-    <p>This is where you can catch the heat of the week.</p>
+    <h2>Heat of the Month</h2>
+    <p>This is where you can catch the heat of the month.</p>
     <button id="music-toggle">▶ Play music</button>
     <audio id="bg-music" src="assets/HOTW 1.mp3" loop></audio>
   </section>
 
   <section id="top-songs">
-    <h2>Top Songs (last 30 days)</h2>
+    <h2>Top Songs (last 7 days)</h2>
     <ol id="top-songs-list"><li>Loading...</li></ol>
+  </section>
+
+  <section id="location">
+    <h2>Locations</h2>
+    <div id="location-map" style="height: 300px;"></div>
+    <p id="location-status">Loading...</p>
   </section>
 
   <section id="comments">
@@ -47,17 +70,70 @@
     <div id="comment-list"></div>
   </section>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script>
+    const LOCATION_API_URL =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'http://localhost:8787/api/location'
+        : 'https://diarmuid-location-api.diarmuidcoffey99.workers.dev/api/location';
+
+    async function renderLocation() {
+      const status = document.getElementById('location-status');
+      try {
+        const res = await fetch(LOCATION_API_URL);
+        const points = await res.json();
+        if (!points || points.length === 0) {
+          status.textContent = 'No location received yet.';
+          return;
+        }
+
+        const latest = points[points.length - 1];
+        const map = L.map('location-map').setView([latest.lat, latest.long], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors',
+        }).addTo(map);
+
+        L.polyline(points.map(p => [p.lat, p.long]), { color: '#3388ff' }).addTo(map);
+
+        for (const p of points) {
+          const when = new Date(p.timestamp).toLocaleString();
+          L.marker([p.lat, p.long]).addTo(map).bindPopup(when);
+        }
+
+        const when = new Date(latest.timestamp).toLocaleString();
+        status.textContent = `Latest: ${latest.lat}, ${latest.long} at ${when} (${points.length} points)`;
+      } catch (e) {
+        status.textContent = "Couldn't load location.";
+      }
+    }
+    renderLocation();
+  </script>
+
+  <script>
+    const bookclubBanner = document.getElementById('bookclub-banner');
+
+    function moveBookclubBanner() {
+      const maxLeft = Math.max(0, window.innerWidth - bookclubBanner.offsetWidth - 10);
+      const maxTop = Math.max(0, window.innerHeight - bookclubBanner.offsetHeight - 10);
+      bookclubBanner.style.left = `${10 + Math.random() * maxLeft}px`;
+      bookclubBanner.style.top = `${10 + Math.random() * maxTop}px`;
+    }
+
+    moveBookclubBanner();
+    setInterval(moveBookclubBanner, 5000);
+  </script>
+
   <script>
     async function checkForNewVersion() {
       try {
         const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
         const { version } = await res.json();
         const seen = localStorage.getItem('siteVersion');
+        localStorage.setItem('siteVersion', version);
         if (seen && seen !== version) {
           location.href = location.pathname + '?v=' + version;
           return;
         }
-        localStorage.setItem('siteVersion', version);
       } catch (e) {
         // offline or fetch blocked — nothing to do
       }
@@ -86,12 +162,12 @@
   <script>
     const LASTFM_API_KEY = 'd38c7bd2ac7c70ddd3accb62ffdfdfdb';
     const LASTFM_USERNAME = 'diarmuidcoffey';
-    const LASTFM_DAYS = 30;
+    const LASTFM_DAYS = 7;
 
     function escapeHtml(str) {
       const div = document.createElement('div');
       div.textContent = str;
-      return div.innerHTML;
+      return div.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
     }
 
     async function fetchRecentTracks(apiKey, fromTs) {
@@ -210,7 +286,7 @@
     function escapeHtml(str) {
       const div = document.createElement('div');
       div.textContent = str;
-      return div.innerHTML;
+      return div.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
     }
 
     commentForm.addEventListener('submit', (e) => {
