@@ -30,7 +30,7 @@
   <h1>Bookclub</h1>
 
   <h2>Currently Reading</h2>
-  <div id="current-book"><p>Loading...</p></div>
+  <div id="current-book" data-react-id="book:current"><p>Loading...</p></div>
 
   <div id="auth-widget"></div>
 
@@ -69,9 +69,9 @@
 
   <div id="profile-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;">
     <div style="background:white;padding:20px;max-width:280px;margin:80px auto;text-align:center;">
-      <img id="profile-modal-img" src="" alt="" style="max-width:100%;border-radius:8px;">
+      <div id="profile-modal-avatar"><img id="profile-modal-img" src="" alt="" style="max-width:100%;border-radius:8px;"></div>
       <p id="profile-modal-name" style="font-weight:bold;"></p>
-      <p id="profile-modal-bio"></p>
+      <div id="profile-modal-bio-wrap"><p id="profile-modal-bio"></p></div>
       <button id="profile-modal-close">Close</button>
     </div>
   </div>
@@ -88,8 +88,8 @@
   <h2>Members</h2>
   <p id="members-row"></p>
   <p id="members-count"></p>
-  <p><button id="play-toggle">Watch the members play</button></p>
-  <canvas id="play-canvas" width="600" height="400" class="hidden" style="border:1px solid #000;"></canvas>
+  <p data-react-id="feature:play"><button id="play-toggle">Watch the members play</button></p>
+  <canvas id="play-canvas" width="600" height="400" class="hidden" style="border:1px solid #000;max-width:100%;height:auto;"></canvas>
 
   <h2>Discussion</h2>
   <div id="composer"></div>
@@ -107,6 +107,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+  <script src="/bookclub/reactions.js"></script>
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyAurvQEXDZINvBrHbMQQU3yC_9xmqQfwj0",
@@ -133,10 +134,17 @@
       return name === 'Moderator';
     }
 
-    function openProfileModal(name, avatar, bio) {
+    function openProfileModal(memberId, name, avatar, bio) {
       document.getElementById('profile-modal-img').src = avatar;
       document.getElementById('profile-modal-name').textContent = name;
       document.getElementById('profile-modal-bio').textContent = bio || '';
+      // Reactions attach to the picture and (if there is one) the bio, only in this modal.
+      const avatarWrap = document.getElementById('profile-modal-avatar');
+      const bioWrap = document.getElementById('profile-modal-bio-wrap');
+      if (memberId) avatarWrap.setAttribute('data-react-id', `avatar:${memberId}`);
+      else avatarWrap.removeAttribute('data-react-id');
+      if (memberId && bio) bioWrap.setAttribute('data-react-id', `bio:${memberId}`);
+      else bioWrap.removeAttribute('data-react-id');
       document.getElementById('profile-modal').classList.remove('hidden');
     }
     function closeProfileModal() {
@@ -147,10 +155,10 @@
       if (e.target.id === 'profile-modal') closeProfileModal();
     });
     document.getElementById('best-dates').addEventListener('click', (e) => {
-      if (e.target.tagName === 'IMG') openProfileModal(e.target.title, e.target.src, e.target.dataset.bio);
+      if (e.target.tagName === 'IMG') openProfileModal(e.target.dataset.memberId, e.target.title, e.target.src, e.target.dataset.bio);
     });
     document.getElementById('members-row').addEventListener('click', (e) => {
-      if (e.target.tagName === 'IMG') openProfileModal(e.target.title, e.target.src, e.target.dataset.bio);
+      if (e.target.tagName === 'IMG') openProfileModal(e.target.dataset.memberId, e.target.title, e.target.src, e.target.dataset.bio);
     });
 
     function escapeHtml(str) {
@@ -257,6 +265,7 @@
       const widget = document.getElementById('auth-widget');
       const identity = getIdentity();
       document.body.style.background = identity && isModerator(identity.name) ? 'darkred' : '';
+      if (window.BookclubReactions) BookclubReactions.refresh();
       if (identity) {
         widget.innerHTML = `
           <p>
@@ -440,6 +449,7 @@
         const when = c.timestamp ? c.timestamp.toDate().toLocaleString() : 'just now';
         const entry = document.createElement('div');
         entry.className = 'comment';
+        entry.setAttribute('data-react-id', `comment:${doc.id}`);
         if (isModerator(c.name)) {
           entry.style.fontWeight = 'bold';
           entry.style.background = 'black';
@@ -451,7 +461,7 @@
           <strong class="comment-name" style="cursor:pointer;text-decoration:underline;">${escapeHtml(c.name)}</strong> ${escapeHtml(c.text)} <small>${when}</small>`;
         entry.querySelector('.comment-name').addEventListener('click', () => {
           const member = membersById[c.memberId];
-          openProfileModal(c.name, c.avatar, member ? member.bio : '');
+          openProfileModal(c.memberId, c.name, c.avatar, member ? member.bio : '');
         });
         feed.appendChild(entry);
       });
@@ -484,9 +494,9 @@
 
       el.innerHTML = sortedDates.map((date) => {
         const people = tally[date];
-        const avatars = people.map((p) => `<img src="${p.avatar}" alt="" title="${escapeHtml(p.name)}" data-bio="${escapeHtml(p.bio || '')}" style="${AVATAR_STYLE}cursor:pointer;">`).join('');
+        const avatars = people.map((p) => `<img src="${p.avatar}" alt="" title="${escapeHtml(p.name)}" data-member-id="${escapeHtml(p.id)}" data-bio="${escapeHtml(p.bio || '')}" style="${AVATAR_STYLE}cursor:pointer;">`).join('');
         return `
-          <p>
+          <p data-react-id="date:${escapeHtml(date)}">
             <strong>${escapeHtml(date)}</strong> - ${people.length} available<br>
             Available: ${avatars}
           </p>`;
@@ -505,16 +515,18 @@
         img.alt = m.name;
         img.title = m.name;
         img.dataset.bio = m.bio || '';
+        img.dataset.memberId = doc.id;
         img.style = `${AVATAR_STYLE}cursor:pointer;`;
         row.appendChild(img);
       });
       snapshot.forEach((doc) => {
-        membersById[doc.id] = doc.data();
+        membersById[doc.id] = { id: doc.id, ...doc.data() };
       });
       countEl.textContent = snapshot.size === 0
         ? 'No members yet - be the first to join.'
         : `${snapshot.size} member${snapshot.size === 1 ? '' : 's'} have joined`;
       renderBestDates();
+      if (window.BookclubReactions) BookclubReactions.refresh();
     });
 
     let playSimulation = null;
@@ -754,6 +766,19 @@
       loginForm.classList.add('hidden');
     }
     document.getElementById('login-cancel').addEventListener('click', closeLoginForm);
+
+    // Reactions are optional: if the module failed to load or init, the rest of the page still works.
+    try {
+      BookclubReactions.init({
+        db,
+        firebase,
+        getIdentity,
+        isModerator,
+        getMembers: () => membersById,
+      });
+    } catch (e) {
+      console.error('Reactions unavailable', e);
+    }
 
     renderAuthWidget();
     renderComposer();
