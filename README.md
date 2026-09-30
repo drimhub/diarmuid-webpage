@@ -6,8 +6,11 @@ Diarmuid's personal website — a static site with a couple of small backend pie
 
 ```
 index.html                   Homepage (static HTML/CSS/JS, no build step)
-bookclub/index.html          /bookclub page (placeholder, "under construction")
-assets/                      Images and audio used by the homepage
+bookclub/index.html          /bookclub page (members, availability, discussion, reactions)
+bookclub/reactions.js        Emoji reactions module used by the bookclub page
+firestore.rules              Firestore security rules (deployed with the Firebase CLI)
+firebase.json, .firebaserc   Firebase CLI config (project: diarmuid-webpage)
+assets/                      Images and audio used by the site
 version.json                 { "version": ... } read by the homepage to force a reload on deploy
 _headers                     Cloudflare Pages header rules (disables caching)
 location-worker/             Cloudflare Worker + D1 backing the "Locations" map on the homepage
@@ -26,6 +29,42 @@ Single static page, no build tooling — just open it or deploy the folder as-is
 - A bouncing "NEW: bookclub" banner linking to `/bookclub`.
 
 The Last.fm API key and Firebase config are embedded client-side by design (they're public-facing keys, not secrets).
+
+## Bookclub (`bookclub/`)
+
+Static page backed directly by Firebase Firestore from the client. There is no real auth: members pick their name from a list and the choice is kept in `localStorage`. Collections: `bookclub_members`, `bookclub_availability`, `bookclub_comments`, `bookclub_reactions`.
+
+### Emoji reactions (`bookclub/reactions.js`)
+
+Any element with a `data-react-id="kind:id"` attribute automatically gets a reaction bar (emoji pills, a ＋ picker and a "who?" link that opens a list of who reacted, when, and with what). A `MutationObserver` keeps bars in sync when the page re-renders, so a new feature only needs to add the attribute.
+
+Target ID kinds in use:
+
+| Kind | Example | Where |
+|---|---|---|
+| `comment` | `comment:<docId>` | Each discussion comment |
+| `book` | `book:current` | Currently-reading block |
+| `date` | `date:2026-10-05` | Each row of Best Dates |
+| `feature` | `feature:play` | The "Watch the members play" button |
+| `avatar` | `avatar:<memberId>` | Profile picture in the profile modal only |
+| `bio` | `bio:<memberId>` | Bio in the profile modal only |
+
+- Mobile: pills and buttons are sized for touch, the picker is a 4-column grid that closes on scroll, and pressing and holding a pill (touch only) opens the who-reacted list filtered to that emoji, since phones have no hover tooltip.
+- Palette: 👍 ❤️ 😂 🔥 📚 😮 😢 🎉. The 🤖 reaction is Moderator-only, and the Moderator can use nothing else.
+- Storage: one doc per (target, member, reaction) in `bookclub_reactions`, id `<targetId>__<memberId>__<reaction>`, with `createdAt` set by the server. Clicking a reaction you already made deletes the doc.
+- Avatars are not stored on reactions; the "who?" modal looks them up from the members list.
+
+### Firestore rules
+
+Rules live in `firestore.rules` (the old wide-open rule is gone; only the listed collections are reachable). Existing collections are still open read/write; only `bookclub_reactions` is validated (emoji whitelist, Moderator-only 🤖, server timestamp, and the reacting member must exist and match the stored name). Logging in as any member, including the Moderator, is intentional, so the rules are guard rails rather than identity checks. To deploy:
+
+```
+npm install -g firebase-tools   # once
+firebase login                  # once
+firebase deploy --only firestore:rules
+```
+
+Deploying only replaces the rules; it never changes or deletes data.
 
 ## `location-worker/`
 

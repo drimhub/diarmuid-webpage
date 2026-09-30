@@ -1,0 +1,57 @@
+rules_version = '2';
+
+// Deployed with: firebase deploy --only firestore:rules
+//
+// Only the collections listed here are reachable; everything else is denied.
+// There is no Firebase Auth on this site (identity is a name picked client-side),
+// so these rules are guard rails, not real access control: they can validate the
+// shape of a write but cannot prove who is making it.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Homepage guestbook (index.html)
+    match /comments/{id} {
+      allow read, write: if true;
+    }
+
+    // Bookclub (bookclub/index.html) - left open as before; tighten separately.
+    match /bookclub_members/{id} {
+      allow read, write: if true;
+    }
+    match /bookclub_availability/{id} {
+      allow read, write: if true;
+    }
+    match /bookclub_comments/{id} {
+      allow read, write: if true;
+    }
+
+    // Emoji reactions (bookclub/reactions.js)
+    // One doc per (target, member, reaction); the doc id encodes that triple so a
+    // member can't react twice with the same emoji. Un-reacting deletes the doc.
+    match /bookclub_reactions/{id} {
+      allow read: if true;
+      allow update: if false;
+      allow delete: if true;
+      allow create: if validReaction(id, request.resource.data);
+    }
+
+    function validReaction(id, d) {
+      return d.keys().hasOnly(['targetId', 'targetKind', 'memberId', 'name', 'reaction', 'createdAt'])
+        && d.keys().hasAll(['targetId', 'targetKind', 'memberId', 'name', 'reaction', 'createdAt'])
+        && d.targetId is string && d.targetId.size() <= 200
+        && d.targetKind is string && d.targetKind.matches('^[a-z]+$')
+        && d.targetId.matches('^' + d.targetKind + ':[A-Za-z0-9_-]+$')
+        && d.memberId is string && d.memberId.matches('^[A-Za-z0-9]{1,100}$')
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 40
+        // Must be a real member, reacting under that member's own name. This stops
+        // made-up ids, but it is not proof of identity (anyone can log in as anyone).
+        && exists(/databases/$(database)/documents/bookclub_members/$(d.memberId))
+        && get(/databases/$(database)/documents/bookclub_members/$(d.memberId)).data.name == d.name
+        && d.reaction in ['thumbsup', 'heart', 'laugh', 'fire', 'book', 'wow', 'sad', 'party', 'robot']
+        // The robot is the Moderator's reaction, and the Moderator can only use the robot.
+        && ((d.reaction == 'robot') == (d.name == 'Moderator'))
+        && d.createdAt == request.time
+        && id == d.targetId + '__' + d.memberId + '__' + d.reaction;
+    }
+  }
+}
