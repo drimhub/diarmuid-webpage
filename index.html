@@ -242,7 +242,7 @@
         for (const { artist, track, count, imageUrl } of top) {
           const li = document.createElement('li');
           li.innerHTML = `
-            ${imageUrl ? `<img src="${imageUrl}" alt="" width="40" height="40" style="vertical-align:middle;margin-right:8px;">` : ''}
+            ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="" width="40" height="40" style="vertical-align:middle;margin-right:8px;">` : ''}
             <strong>${escapeHtml(artist)}</strong> - ${escapeHtml(track)} (${count} plays)
           `;
           list.appendChild(li);

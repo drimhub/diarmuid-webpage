@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Bookclub World - Diarmuid's Site</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #111;
+      font-family: sans-serif;
+      overscroll-behavior: none;
+    }
+    #world {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+      cursor: grab;
+    }
+    #hud {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      color: #fff;
+      font-size: 14px;
+      text-shadow: 0 0 3px #000, 0 0 3px #000;
+      pointer-events: none;
+    }
+    #hud a { color: #9cf; pointer-events: auto; }
+    #hud p { margin: 0 0 4px; }
+    #message {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      text-align: center;
+      padding: 20px;
+    }
+    #hud-status { color: #ff8080; }
+    #rotate-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #111;
+      color: #fff;
+      text-align: center;
+      padding: 20px;
+      font-size: 18px;
+    }
+    #rotate-overlay .icon { font-size: 64px; margin-bottom: 12px; }
+    @media (orientation: portrait) and (pointer: coarse) {
+      #rotate-overlay { display: flex; }
+    }
+    #joystick-base, #joystick-knob {
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      display: none;
+    }
+    #joystick-base {
+      width: 100px;
+      height: 100px;
+      margin: -50px 0 0 -50px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 2px solid rgba(255, 255, 255, 0.4);
+    }
+    #joystick-knob {
+      width: 44px;
+      height: 44px;
+      margin: -22px 0 0 -22px;
+      background: rgba(255, 255, 255, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="world"></canvas>
+  <div id="hud">
+    <p><a href="/bookclub">&larr; Back to bookclub</a></p>
+    <p id="hud-identity"></p>
+    <p id="hud-online"></p>
+    <p id="hud-help"></p>
+    <p id="hud-status"></p>
+  </div>
+  <div id="rotate-overlay">
+    <div class="icon">&#8635;</div>
+    <div>Please rotate your phone to landscape to enter the world.</div>
+  </div>
+  <div id="message"></div>
+  <div id="joystick-base"></div>
+  <div id="joystick-knob"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAurvQEXDZINvBrHbMQQU3yC_9xmqQfwj0",
+      authDomain: "diarmuid-webpage.firebaseapp.com",
+      projectId: "diarmuid-webpage",
+      storageBucket: "diarmuid-webpage.firebasestorage.app",
+      messagingSenderId: "234273109755",
+      appId: "1:234273109755:web:45996e94fdca4ad520225e"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // ---- Config ----
+    const IDENTITY_KEY = 'bookclubMember';
+    const POSITIONS_COLLECTION = 'bookclub_world_positions';
+    const ROOM_SIZE = 40;              // square room, side length in world units
+    const HALF = ROOM_SIZE / 2;
+    const WALL_HEIGHT = 6;
+    const EYE_HEIGHT = 1.6;
+    const PLAYER_MARGIN = 0.6;         // keep players this far from walls
+    const MOVE_SPEED = 4;              // units per second
+    const LOOK_SENSITIVITY = 0.005;    // radians per pixel
+    const MAX_PITCH = Math.PI / 2 - 0.05;
+    const JOYSTICK_RADIUS = 50;
+    const JOYSTICK_DEADZONE = 0.12;
+
+    // Cost controls (Firestore): keep writes/reads low.
+    const SAVE_INTERVAL_MS = 3000;      // max one position write per interval while moving
+    const HEARTBEAT_INTERVAL_MS = 90000; // keep lastSeen fresh while standing still
+    const STALE_MS = 5 * 60 * 1000;     // players not seen for this long are hidden
+    const MAX_REMOTE_PLAYERS = 30;      // cap on the listener query
+    const REMOTE_LERP_RATE = 8;         // higher = snappier interpolation
+
+    function getIdentity() {
+      try {
+        return JSON.parse(localStorage.getItem(IDENTITY_KEY));
+      } catch {
+        return null;
+      }
+    }
+
+    const hudIdentity = document.getElementById('hud-identity');
+    const hudOnline = document.getElementById('hud-online');
+    const hudHelp = document.getElementById('hud-help');
+    const messageEl = document.getElementById('message');
+    const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+
+    const hudStatus = document.getElementById('hud-status');
+    function showStatus(text) {
+      hudStatus.textContent = text;
+    }
+    function describeFirestoreError(prefix, err) {
+      console.error(prefix, err);
+      const code = err && err.code ? ` (${err.code})` : '';
+      if (err && err.code === 'permission-denied') {
+        return `${prefix}: Firestore rules block the ${POSITIONS_COLLECTION} collection.`;
+      }
+      return `${prefix}${code}`;
+    }
+
+    // Best effort landscape lock (Android Chrome, needs fullscreen; iOS ignores it).
+    // The portrait overlay in CSS is the fallback that works everywhere.
+    let orientationLockTried = false;
+    function tryLockLandscape() {
+      if (orientationLockTried || !isTouch) return;
+      orientationLockTried = true;
+      const lock = () => screen.orientation && screen.orientation.lock
+        && screen.orientation.lock('landscape').catch(() => {});
+      const el = document.documentElement;
+      if (el.requestFullscreen) {
+        el.requestFullscreen().then(lock).catch(() => {});
+      } else {
+        lock();
+      }
+    }
+
+    function showMessage(text) {
+      messageEl.textContent = text;
+      messageEl.style.display = 'flex';
+    }
+
+    // ---- Renderer / scene ----
+    const canvas = document.getElementById('world');
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    } catch (e) {
+      showMessage("Your browser couldn't start WebGL, so the world can't load.");
+      throw e;
+    }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+    scene.fog = new THREE.Fog(0x1a1a2e, 20, 70);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 200);
+    camera.rotation.order = 'YXZ';
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+    sun.position.set(10, 20, 5);
+    scene.add(sun);
+
+    function buildRoom() {
+      // Checkerboard floor
+      const tex = document.createElement('canvas');
+      tex.width = tex.height = 128;
+      const tctx = tex.getContext('2d');
+      tctx.fillStyle = '#3a3a52';
+      tctx.fillRect(0, 0, 128, 128);
+      tctx.fillStyle = '#4a4a66';
+      tctx.fillRect(0, 0, 64, 64);
+      tctx.fillRect(64, 64, 64, 64);
+      const floorTex = new THREE.CanvasTexture(tex);
+      floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+      floorTex.repeat.set(ROOM_SIZE / 2, ROOM_SIZE / 2);
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE),
+        new THREE.MeshLambertMaterial({ map: floorTex })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+
+      // Walls (four sides, inside faces visible)
+      const wallMat = new THREE.MeshLambertMaterial({ color: 0x8a7f6a, side: THREE.DoubleSide });
+      const walls = [
+        { x: 0, z: -HALF, ry: 0 },
+        { x: 0, z: HALF, ry: Math.PI },
+        { x: -HALF, z: 0, ry: Math.PI / 2 },
+        { x: HALF, z: 0, ry: -Math.PI / 2 },
+      ];
+      walls.forEach((w) => {
+        const wall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_SIZE, WALL_HEIGHT), wallMat);
+        wall.position.set(w.x, WALL_HEIGHT / 2, w.z);
+        wall.rotation.y = w.ry;
+        scene.add(wall);
+      });
+
+      // Ceiling so the room feels enclosed
+      const ceiling = new THREE.Mesh(
+        new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE),
+        new THREE.MeshLambertMaterial({ color: 0x2a2a3a, side: THREE.DoubleSide })
+      );
+      ceiling.rotation.x = Math.PI / 2;
+      ceiling.position.y = WALL_HEIGHT;
+      scene.add(ceiling);
+    }
+    buildRoom();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ---- Local player state ----
+    const identity = getIdentity();
+    const me = {
+      x: (Math.random() - 0.5) * 6,
+      z: (Math.random() - 0.5) * 6,
+      yaw: 0,
+      pitch: 0,
+    };
+    let positionLoaded = !identity; // spectators have nothing to load
+    let lastSavedX = null;
+    let lastSavedZ = null;
+    let lastSavedYaw = null;
+    let sentProfile = false;
+
+    function clampToRoom() {
+      const limit = HALF - PLAYER_MARGIN;
+      me.x = Math.max(-limit, Math.min(limit, me.x));
+      me.z = Math.max(-limit, Math.min(limit, me.z));
+    }
+
+    // ---- Input ----
+    const keys = {};
+    const MOVE_KEYS = {
+      KeyW: 'forward', ArrowUp: 'forward',
+      KeyS: 'back', ArrowDown: 'back',
+      KeyA: 'left', ArrowLeft: 'left',
+      KeyD: 'right', ArrowRight: 'right',
+    };
+    window.addEventListener('keydown', (e) => {
+      const action = MOVE_KEYS[e.code];
+      if (action) { keys[action] = true; e.preventDefault(); }
+    });
+    window.addEventListener('keyup', (e) => {
+      const action = MOVE_KEYS[e.code];
+      if (action) keys[action] = false;
+    });
+    window.addEventListener('blur', () => {
+      Object.keys(keys).forEach((k) => { keys[k] = false; });
+    });
+
+    function applyLook(dx, dy) {
+      me.yaw -= dx * LOOK_SENSITIVITY;
+      me.pitch -= dy * LOOK_SENSITIVITY;
+      me.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, me.pitch));
+    }
+
+    // Mouse look (drag)
+    let mouseDragging = false;
+    canvas.addEventListener('mousedown', () => { mouseDragging = true; canvas.style.cursor = 'grabbing'; });
+    window.addEventListener('mouseup', () => { mouseDragging = false; canvas.style.cursor = 'grab'; });
+    window.addEventListener('mousemove', (e) => {
+      if (mouseDragging) applyLook(e.movementX, e.movementY);
+    });
+
+    // Touch: left half = floating joystick for movement, right half = look
+    const joystickBase = document.getElementById('joystick-base');
+    const joystickKnob = document.getElementById('joystick-knob');
+    const joystick = { id: null, originX: 0, originY: 0, x: 0, y: 0 }; // x/y in -1..1
+    const look = { id: null, lastX: 0, lastY: 0 };
+
+    function hideJoystick() {
+      joystickBase.style.display = 'none';
+      joystickKnob.style.display = 'none';
+    }
+    function moveKnob(clientX, clientY) {
+      const dx = clientX - joystick.originX;
+      const dy = clientY - joystick.originY;
+      const dist = Math.hypot(dx, dy);
+      const clamped = Math.min(dist, JOYSTICK_RADIUS);
+      const nx = dist > 0 ? dx / dist : 0;
+      const ny = dist > 0 ? dy / dist : 0;
+      joystick.x = (nx * clamped) / JOYSTICK_RADIUS;
+      joystick.y = (ny * clamped) / JOYSTICK_RADIUS;
+      joystickKnob.style.left = `${joystick.originX + nx * clamped}px`;
+      joystickKnob.style.top = `${joystick.originY + ny * clamped}px`;
+    }
+
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      tryLockLandscape();
+      for (const t of e.changedTouches) {
+        if (t.clientX < window.innerWidth / 2 && joystick.id === null) {
+          joystick.id = t.identifier;
+          joystick.originX = t.clientX;
+          joystick.originY = t.clientY;
+          joystickBase.style.left = `${t.clientX}px`;
+          joystickBase.style.top = `${t.clientY}px`;
+          joystickBase.style.display = 'block';
+          joystickKnob.style.display = 'block';
+          moveKnob(t.clientX, t.clientY);
+        } else if (t.clientX >= window.innerWidth / 2 && look.id === null) {
+          look.id = t.identifier;
+          look.lastX = t.clientX;
+          look.lastY = t.clientY;
+        }
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        if (t.identifier === joystick.id) {
+          moveKnob(t.clientX, t.clientY);
+        } else if (t.identifier === look.id) {
+          applyLook(t.clientX - look.lastX, t.clientY - look.lastY);
+          look.lastX = t.clientX;
+          look.lastY = t.clientY;
+        }
+      }
+    }, { passive: false });
+
+    function endTouch(e) {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joystick.id) {
+          joystick.id = null;
+          joystick.x = 0;
+          joystick.y = 0;
+          hideJoystick();
+        } else if (t.identifier === look.id) {
+          look.id = null;
+        }
+      }
+    }
+    canvas.addEventListener('touchend', endTouch);
+    canvas.addEventListener('touchcancel', endTouch);
+
+    function getMoveInput() {
+      let forward = (keys.forward ? 1 : 0) - (keys.back ? 1 : 0);
+      let strafe = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+      const jMag = Math.hypot(joystick.x, joystick.y);
+      if (jMag > JOYSTICK_DEADZONE) {
+        strafe += joystick.x;
+        forward += -joystick.y; // dragging up moves forward
+      }
+      const mag = Math.hypot(forward, strafe);
+      if (mag > 1) { forward /= mag; strafe /= mag; }
+      return { forward, strafe };
+    }
+
+    // ---- Avatars / remote players ----
+    function makeAvatarTexture(src, fallbackName) {
+      const size = 128;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      const tex = new THREE.CanvasTexture(c);
+
+      function drawFallback() {
+        let hash = 0;
+        const name = fallbackName || '?';
+        for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        ctx.clearRect(0, 0, size, size);
+        ctx.fillStyle = `hsl(${Math.abs(hash) % 360}, 60%, 55%)`;
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 56px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText((name[0] || '?').toUpperCase(), size / 2, size / 2 + 4);
+        tex.needsUpdate = true;
+      }
+      drawFallback();
+
+      if (src) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.clearRect(0, 0, size, size);
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(img, 0, 0, size, size);
+          ctx.restore();
+          tex.needsUpdate = true;
+        };
+        img.src = src;
+      }
+      return tex;
+    }
+
+    function makeNameSprite(name) {
+      const c = document.createElement('canvas');
+      c.width = 256;
+      c.height = 64;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, 0, 256, 64);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 30px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(name.length > 18 ? `${name.slice(0, 17)}…` : name, 128, 34);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+      sprite.scale.set(1.6, 0.4, 1);
+      return sprite;
+    }
+
+    const remotePlayers = new Map(); // memberId -> { group, targetX, targetZ, lastSeen, avatarSrc, ... }
+
+    function createRemotePlayer(id, data) {
+      const group = new THREE.Group();
+
+      let hash = 0;
+      const name = data.name || '?';
+      for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.3, 0.35, 1.0, 16),
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`hsl(${Math.abs(hash) % 360}, 50%, 45%)`) })
+      );
+      body.position.y = 0.5;
+      group.add(body);
+
+      const faceTex = makeAvatarTexture(data.avatar, name);
+      const face = new THREE.Sprite(new THREE.SpriteMaterial({ map: faceTex, transparent: true }));
+      face.scale.set(0.8, 0.8, 1);
+      face.position.y = 1.4;
+      group.add(face);
+
+      const label = makeNameSprite(name);
+      label.position.y = 2.1;
+      group.add(label);
+
+      group.position.set(data.x, 0, data.z);
+      scene.add(group);
+
+      return {
+        group,
+        faceTex,
+        avatarSrc: data.avatar,
+        targetX: data.x,
+        targetZ: data.z,
+        lastSeen: 0,
+      };
+    }
+
+    function disposeRemotePlayer(p) {
+      scene.remove(p.group);
+      p.group.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (obj.material.map) obj.material.map.dispose();
+          obj.material.dispose();
+        }
+      });
+    }
+
+    function clearRemotePlayers() {
+      remotePlayers.forEach(disposeRemotePlayer);
+      remotePlayers.clear();
+    }
+
+    function tsToMs(ts) {
+      // serverTimestamp is null on local pending writes; treat as "now"
+      return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Date.now();
+    }
+
+    function handlePositionDoc(doc) {
+      if (identity && doc.id === identity.id) return; // that's me
+      const data = doc.data({ serverTimestamps: 'estimate' });
+      if (typeof data.x !== 'number' || typeof data.z !== 'number') return;
+      const lastSeen = tsToMs(data.lastSeen);
+      if (Date.now() - lastSeen > STALE_MS) {
+        const old = remotePlayers.get(doc.id);
+        if (old) { disposeRemotePlayer(old); remotePlayers.delete(doc.id); }
+        return;
+      }
+      let p = remotePlayers.get(doc.id);
+      if (!p) {
+        p = createRemotePlayer(doc.id, data);
+        remotePlayers.set(doc.id, p);
+      } else {
+        p.targetX = data.x;
+        p.targetZ = data.z;
+      }
+      p.lastSeen = lastSeen;
+    }
+
+    function pruneStalePlayers() {
+      const now = Date.now();
+      remotePlayers.forEach((p, id) => {
+        if (now - p.lastSeen > STALE_MS) {
+          disposeRemotePlayer(p);
+          remotePlayers.delete(id);
+        }
+      });
+      updateOnlineCount();
+    }
+    setInterval(pruneStalePlayers, 30000);
+
+    function updateOnlineCount() {
+      const others = remotePlayers.size;
+      const total = others + (identity ? 1 : 0);
+      hudOnline.textContent = total === 0
+        ? 'Nobody here right now'
+        : `${total} in the room${others > 0 ? '' : ' (just you)'}`;
+    }
+
+    // ---- Firestore listener (paused when tab hidden to save reads) ----
+    let unsubscribePositions = null;
+
+    function startListening() {
+      if (unsubscribePositions) return;
+      const cutoff = firebase.firestore.Timestamp.fromMillis(Date.now() - STALE_MS);
+      unsubscribePositions = db.collection(POSITIONS_COLLECTION)
+        .where('lastSeen', '>', cutoff)
+        .orderBy('lastSeen', 'desc')
+        .limit(MAX_REMOTE_PLAYERS)
+        .onSnapshot((snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'removed') {
+              const old = remotePlayers.get(change.doc.id);
+              if (old) { disposeRemotePlayer(old); remotePlayers.delete(change.doc.id); }
+            } else {
+              handlePositionDoc(change.doc);
+            }
+          });
+          updateOnlineCount();
+        }, (err) => {
+          showStatus(describeFirestoreError("Can't see other players", err));
+        });
+    }
+    function stopListening() {
+      if (unsubscribePositions) {
+        unsubscribePositions();
+        unsubscribePositions = null;
+      }
+      clearRemotePlayers();
+    }
+
+    // ---- Persistence ----
+    async function loadMyPosition() {
+      if (!identity) return;
+      try {
+        const doc = await db.collection(POSITIONS_COLLECTION).doc(identity.id).get();
+        if (doc.exists) {
+          const d = doc.data();
+          if (typeof d.x === 'number' && typeof d.z === 'number') {
+            me.x = d.x;
+            me.z = d.z;
+            if (typeof d.yaw === 'number') me.yaw = d.yaw;
+            clampToRoom();
+          }
+        }
+      } catch (e) {
+        showStatus(describeFirestoreError("Couldn't load your saved position", e));
+      } finally {
+        positionLoaded = true;
+        lastSavedX = me.x;
+        lastSavedZ = me.z;
+        lastSavedYaw = me.yaw;
+      }
+    }
+
+    let saving = false;
+    async function savePosition(force) {
+      if (!identity || !positionLoaded || saving) return;
+      const moved = lastSavedX === null
+        || Math.abs(me.x - lastSavedX) > 0.05
+        || Math.abs(me.z - lastSavedZ) > 0.05
+        || Math.abs(me.yaw - lastSavedYaw) > 0.05;
+      if (!moved && !force) return;
+      saving = true;
+      const payload = {
+        x: me.x,
+        z: me.z,
+        yaw: me.yaw,
+        lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+      };
+      if (!sentProfile) {
+        payload.name = identity.name;
+        payload.avatar = identity.avatar;
+      }
+      try {
+        await db.collection(POSITIONS_COLLECTION).doc(identity.id).set(payload, { merge: true });
+        sentProfile = true;
+        lastSavedX = me.x;
+        lastSavedZ = me.z;
+        lastSavedYaw = me.yaw;
+      } catch (e) {
+        showStatus(describeFirestoreError("Couldn't save your position", e));
+      } finally {
+        saving = false;
+      }
+    }
+
+    // Throttled save while moving
+    setInterval(() => {
+      if (document.visibilityState === 'visible') savePosition(false);
+    }, SAVE_INTERVAL_MS);
+    // Heartbeat so a player standing still doesn't vanish for others
+    setInterval(() => {
+      if (document.visibilityState === 'visible') savePosition(true);
+    }, HEARTBEAT_INTERVAL_MS);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        savePosition(true);
+        stopListening();
+      } else {
+        startListening();
+      }
+    });
+    window.addEventListener('pagehide', () => savePosition(true));
+
+    // ---- Main loop ----
+    const clock = new THREE.Clock();
+    function frame() {
+      requestAnimationFrame(frame);
+      const dt = Math.min(clock.getDelta(), 0.1);
+
+      if (positionLoaded) {
+        const { forward, strafe } = getMoveInput();
+        if (forward !== 0 || strafe !== 0) {
+          const fx = -Math.sin(me.yaw);
+          const fz = -Math.cos(me.yaw);
+          const rx = Math.cos(me.yaw);
+          const rz = -Math.sin(me.yaw);
+          me.x += (fx * forward + rx * strafe) * MOVE_SPEED * dt;
+          me.z += (fz * forward + rz * strafe) * MOVE_SPEED * dt;
+          clampToRoom();
+        }
+      }
+
+      camera.position.set(me.x, EYE_HEIGHT, me.z);
+      camera.rotation.set(me.pitch, me.yaw, 0);
+
+      const t = 1 - Math.exp(-REMOTE_LERP_RATE * dt);
+      remotePlayers.forEach((p) => {
+        p.group.position.x += (p.targetX - p.group.position.x) * t;
+        p.group.position.z += (p.targetZ - p.group.position.z) * t;
+      });
+
+      renderer.render(scene, camera);
+    }
+
+    // ---- Boot ----
+    if (identity) {
+      hudIdentity.textContent = `Logged in as ${identity.name}`;
+    } else {
+      hudIdentity.textContent = 'Spectating - ';
+      const link = document.createElement('a');
+      link.href = '/bookclub';
+      link.textContent = 'join or log in on the bookclub page to appear here';
+      hudIdentity.appendChild(link);
+    }
+    hudHelp.textContent = isTouch
+      ? 'Left thumb: move. Right thumb: look.'
+      : 'WASD / arrows: move. Drag mouse: look.';
+    updateOnlineCount();
+
+    loadMyPosition().then(() => {
+      if (identity) savePosition(true); // announce presence immediately
+    });
+    startListening();
+    frame();
+  </script>
+
+  <script>
+    async function checkForNewVersion() {
+      try {
+        const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
+        const { version } = await res.json();
+        const seen = localStorage.getItem('siteVersion');
+        localStorage.setItem('siteVersion', version);
+        if (seen && seen !== version) {
+          location.href = location.pathname + '?v=' + version;
+          return;
+        }
+      } catch (e) {
+        // offline or fetch blocked — nothing to do
+      }
+    }
+    checkForNewVersion();
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) checkForNewVersion();
+    });
+  </script>
+</body>
+</html>

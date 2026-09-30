@@ -28,6 +28,7 @@
 <body>
   <p><a href="/">&larr; Back home</a></p>
   <h1>Bookclub</h1>
+  <p><a href="/bookclub_world/">Enter the Bookclub World (3D)</a></p>
 
   <h2>Currently Reading</h2>
   <div id="current-book"><p>Loading...</p></div>
@@ -235,7 +236,7 @@
 
       el.innerHTML = `
         <p>
-          ${coverImages.length ? `<img id="book-cover-img" src="${coverImages[0]}" alt="" width="120" style="vertical-align:top;margin-right:12px;">` : ''}
+          ${coverImages.length ? `<img id="book-cover-img" src="${escapeHtml(coverImages[0])}" alt="" width="120" style="vertical-align:top;margin-right:12px;">` : ''}
           <strong>${escapeHtml(CURRENT_BOOK.title)}</strong><br>
           by ${escapeHtml(CURRENT_BOOK.author)}<br>
           ${CURRENT_BOOK.pages} pages
@@ -260,7 +261,7 @@
       if (identity) {
         widget.innerHTML = `
           <p>
-            <img src="${identity.avatar}" alt="" style="${AVATAR_STYLE}">
+            <img src="${escapeHtml(identity.avatar)}" alt="" style="${AVATAR_STYLE}">
             Logged in as <strong>${escapeHtml(identity.name)}</strong>
             (<a href="#" id="switch-link">switch</a>)
           </p>`;
@@ -447,7 +448,7 @@
           entry.style.padding = '6px';
         }
         entry.innerHTML = `
-          <img src="${c.avatar}" alt="" style="${AVATAR_STYLE}">
+          <img src="${escapeHtml(c.avatar)}" alt="" style="${AVATAR_STYLE}">
           <strong class="comment-name" style="cursor:pointer;text-decoration:underline;">${escapeHtml(c.name)}</strong> ${escapeHtml(c.text)} <small>${when}</small>`;
         entry.querySelector('.comment-name').addEventListener('click', () => {
           const member = membersById[c.memberId];
@@ -484,7 +485,7 @@
 
       el.innerHTML = sortedDates.map((date) => {
         const people = tally[date];
-        const avatars = people.map((p) => `<img src="${p.avatar}" alt="" title="${escapeHtml(p.name)}" data-bio="${escapeHtml(p.bio || '')}" style="${AVATAR_STYLE}cursor:pointer;">`).join('');
+        const avatars = people.map((p) => `<img src="${escapeHtml(p.avatar)}" alt="" title="${escapeHtml(p.name)}" data-bio="${escapeHtml(p.bio || '')}" style="${AVATAR_STYLE}cursor:pointer;">`).join('');
         return `
           <p>
             <strong>${escapeHtml(date)}</strong> - ${people.length} available<br>
@@ -735,7 +736,7 @@
           const m = doc.data();
           const row = document.createElement('p');
           const moderatorStyle = isModerator(m.name) ? 'background:black;color:white;' : '';
-          row.innerHTML = `<button type="button" data-id="${doc.id}" style="${moderatorStyle}"><img src="${m.avatar}" alt="" style="${AVATAR_STYLE}">${escapeHtml(m.name)}</button>`;
+          row.innerHTML = `<button type="button" data-id="${doc.id}" style="${moderatorStyle}"><img src="${escapeHtml(m.avatar)}" alt="" style="${AVATAR_STYLE}">${escapeHtml(m.name)}</button>`;
           row.querySelector('button').addEventListener('click', () => {
             setIdentity({ id: doc.id, name: m.name, avatar: m.avatar });
             closeLoginForm();
