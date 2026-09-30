@@ -164,7 +164,7 @@
     const PUSH_OUT_RADIUS = BOT_BODY_RADIUS + 0.4; // players can't get closer than this (centre to centre)
     const CATCH_DISTANCE = PUSH_OUT_RADIUS + 0.4;  // bot catches a player within this distance
     const CATCH_COOLDOWN_MS = 15000;    // a caught player is skipped as a target for this long
-    const CATCH_PAUSE_MS = 1500;        // bot stops briefly after a catch
+    const RETREAT_MS = 5000;            // after a catch the bot walks away for this long, then chases again
     const RETARGET_MS = 500;            // how often the bot re-picks its closest target
     const ACTIVE_MS = 2 * 60 * 1000;    // active player = seen this recently (heartbeat is 90s)
     const LEASE_MS = 6000;              // leader lease; renewed on every bot write
@@ -778,7 +778,8 @@
     const caughtAtById = {};                 // memberId -> ms timestamp of last catch (leader only)
     let botTargetId = null;
     let botRetargetAt = 0;
-    let botPausedUntil = 0;
+    let botRetreatUntil = 0;
+    let botRetreatPoint = null;
     let lastBotWriteAt = 0;
     let lastBotMoving = false;
     let botSaving = false;
@@ -956,23 +957,40 @@
 
       bot.vx = 0;
       bot.vz = 0;
-      if (target && now >= botPausedUntil) {
-        const dx = target.x - bot.x;
-        const dz = target.z - bot.z;
+      const limit = HALF - BOT_BODY_RADIUS;
+      // Walk toward (tx, tz) at BOT_SPEED; returns the distance that was left.
+      const stepToward = (tx, tz) => {
+        const dx = tx - bot.x;
+        const dz = tz - bot.z;
         const dist = Math.hypot(dx, dz);
+        if (dist > 0.001) {
+          bot.vx = (dx / dist) * BOT_SPEED;
+          bot.vz = (dz / dist) * BOT_SPEED;
+          bot.yaw = Math.atan2(-dx, -dz);
+          bot.x = Math.max(-limit, Math.min(limit, bot.x + bot.vx * dt));
+          bot.z = Math.max(-limit, Math.min(limit, bot.z + bot.vz * dt));
+        }
+        return dist;
+      };
+
+      if (now < botRetreatUntil && botRetreatPoint) {
+        // Walking away after a catch. Stand still once the far corner is reached.
+        if (stepToward(botRetreatPoint.x, botRetreatPoint.z) < 0.5) {
+          bot.vx = 0;
+          bot.vz = 0;
+        }
+      } else if (target) {
+        const dist = Math.hypot(target.x - bot.x, target.z - bot.z);
         if (dist <= CATCH_DISTANCE) {
           caughtAtById[target.id] = now;
-          botPausedUntil = now + CATCH_PAUSE_MS;
+          botRetreatUntil = now + RETREAT_MS;
+          // Retreat to the corner of the room farthest from the player who was just caught.
+          botRetreatPoint = { x: target.x >= 0 ? -limit : limit, z: target.z >= 0 ? -limit : limit };
           botTargetId = null;
           botRetargetAt = 0;
           writeBot({ caughtId: target.id, caughtAt: now });
         } else {
-          bot.vx = (dx / dist) * BOT_SPEED;
-          bot.vz = (dz / dist) * BOT_SPEED;
-          bot.yaw = Math.atan2(-dx, -dz);
-          const limit = HALF - BOT_BODY_RADIUS;
-          bot.x = Math.max(-limit, Math.min(limit, bot.x + bot.vx * dt));
-          bot.z = Math.max(-limit, Math.min(limit, bot.z + bot.vz * dt));
+          stepToward(target.x, target.z);
         }
       }
 
