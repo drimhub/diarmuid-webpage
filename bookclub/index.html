@@ -22,12 +22,29 @@
       z-index: -1;
     }
     .hidden { display: none; }
+    #world-banner {
+      display: inline-block;
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 999;
+      font-weight: bold;
+      text-decoration: none;
+      color: #d1004a;
+      background: #ffe3ee;
+      border: 2px solid #d1004a;
+      border-radius: 6px;
+      padding: 6px 14px;
+      transition: top 4s ease-in-out, left 4s ease-in-out;
+    }
+    #world-banner.hidden { display: none; }
     .comment { margin-bottom: 10px; }
   </style>
 </head>
 <body>
   <p><a href="/">&larr; Back home</a></p>
   <h1>Bookclub</h1>
+  <a id="world-banner" class="hidden" href="/bookclub_world/">NEW: Moderator's World</a>
 
   <h2>Currently Reading</h2>
   <div id="current-book" data-react-id="book:current"><p>Loading...</p></div>
@@ -243,7 +260,7 @@
 
       el.innerHTML = `
         <p>
-          ${coverImages.length ? `<img id="book-cover-img" src="${coverImages[0]}" alt="" width="120" style="vertical-align:top;margin-right:12px;">` : ''}
+          ${coverImages.length ? `<img id="book-cover-img" src="${escapeHtml(coverImages[0])}" alt="" width="120" style="vertical-align:top;margin-right:12px;">` : ''}
           <strong>${escapeHtml(CURRENT_BOOK.title)}</strong><br>
           by ${escapeHtml(CURRENT_BOOK.author)}<br>
           ${CURRENT_BOOK.pages} pages
@@ -264,12 +281,13 @@
     function renderAuthWidget() {
       const widget = document.getElementById('auth-widget');
       const identity = getIdentity();
+      document.getElementById('world-banner').classList.toggle('hidden', !identity);
       document.body.style.background = identity && isModerator(identity.name) ? 'darkred' : '';
       if (window.BookclubReactions) BookclubReactions.refresh();
       if (identity) {
         widget.innerHTML = `
           <p>
-            <img src="${identity.avatar}" alt="" style="${AVATAR_STYLE}">
+            <img src="${escapeHtml(identity.avatar)}" alt="" style="${AVATAR_STYLE}">
             Logged in as <strong>${escapeHtml(identity.name)}</strong>
             (<a href="#" id="switch-link">switch</a>)
           </p>`;
@@ -457,7 +475,7 @@
           entry.style.padding = '6px';
         }
         entry.innerHTML = `
-          <img src="${c.avatar}" alt="" style="${AVATAR_STYLE}">
+          <img src="${escapeHtml(c.avatar)}" alt="" style="${AVATAR_STYLE}">
           <strong class="comment-name" style="cursor:pointer;text-decoration:underline;">${escapeHtml(c.name)}</strong> ${escapeHtml(c.text)} <small>${when}</small>`;
         entry.querySelector('.comment-name').addEventListener('click', () => {
           const member = membersById[c.memberId];
@@ -494,7 +512,7 @@
 
       el.innerHTML = sortedDates.map((date) => {
         const people = tally[date];
-        const avatars = people.map((p) => `<img src="${p.avatar}" alt="" title="${escapeHtml(p.name)}" data-member-id="${escapeHtml(p.id)}" data-bio="${escapeHtml(p.bio || '')}" style="${AVATAR_STYLE}cursor:pointer;">`).join('');
+        const avatars = people.map((p) => `<img src="${escapeHtml(p.avatar)}" alt="" title="${escapeHtml(p.name)}" data-member-id="${escapeHtml(p.id)}" data-bio="${escapeHtml(p.bio || '')}" style="${AVATAR_STYLE}cursor:pointer;">`).join('');
         return `
           <p data-react-id="date:${escapeHtml(date)}">
             <strong>${escapeHtml(date)}</strong> - ${people.length} available<br>
@@ -747,7 +765,7 @@
           const m = doc.data();
           const row = document.createElement('p');
           const moderatorStyle = isModerator(m.name) ? 'background:black;color:white;' : '';
-          row.innerHTML = `<button type="button" data-id="${doc.id}" style="${moderatorStyle}"><img src="${m.avatar}" alt="" style="${AVATAR_STYLE}">${escapeHtml(m.name)}</button>`;
+          row.innerHTML = `<button type="button" data-id="${doc.id}" style="${moderatorStyle}"><img src="${escapeHtml(m.avatar)}" alt="" style="${AVATAR_STYLE}">${escapeHtml(m.name)}</button>`;
           row.querySelector('button').addEventListener('click', () => {
             setIdentity({ id: doc.id, name: m.name, avatar: m.avatar });
             closeLoginForm();
@@ -782,6 +800,17 @@
 
     renderAuthWidget();
     renderComposer();
+
+    // Bouncing "NEW" banner (same idea as the homepage one); only visible when logged in.
+    const worldBanner = document.getElementById('world-banner');
+    function moveWorldBanner() {
+      const maxLeft = Math.max(0, window.innerWidth - worldBanner.offsetWidth - 10);
+      const maxTop = Math.max(0, window.innerHeight - worldBanner.offsetHeight - 10);
+      worldBanner.style.left = `${10 + Math.random() * maxLeft}px`;
+      worldBanner.style.top = `${10 + Math.random() * maxTop}px`;
+    }
+    moveWorldBanner();
+    setInterval(moveWorldBanner, 5000);
   </script>
 
   <script>
