@@ -45,6 +45,23 @@
       padding: 20px;
     }
     #hud-status { color: #ff8080; }
+    #caught-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(120, 0, 0, 0.55);
+      color: #fff;
+      text-align: center;
+      font-size: clamp(28px, 7vw, 80px);
+      font-weight: 900;
+      line-height: 1.15;
+      padding: 20px;
+      text-shadow: 0 0 10px #000, 0 0 4px #000;
+      pointer-events: none;
+    }
     #rotate-overlay {
       position: fixed;
       inset: 0;
@@ -93,6 +110,7 @@
     <p id="hud-help"></p>
     <p id="hud-status"></p>
   </div>
+  <div id="caught-overlay">YOU WERE CAUGHT BY THE MODERATOR.<br>PLAY NICER</div>
   <div id="rotate-overlay">
     <div class="icon">&#8635;</div>
     <div>Please rotate your phone to landscape to enter the world.</div>
@@ -121,7 +139,7 @@
     const POSITIONS_COLLECTION = 'bookclub_world_positions';
     const ROOM_SIZE = 40;              // square room, side length in world units
     const HALF = ROOM_SIZE / 2;
-    const WALL_HEIGHT = 6;
+    const WALL_HEIGHT = 14;           // tall enough for the 5x Moderator
     const EYE_HEIGHT = 1.6;
     const PLAYER_MARGIN = 0.6;         // keep players this far from walls
     const MOVE_SPEED = 4;              // units per second
@@ -131,10 +149,32 @@
     const JOYSTICK_DEADZONE = 0.12;
 
     // Cost controls (Firestore): keep writes/reads low.
-    const SAVE_INTERVAL_MS = 3000;      // max one position write per interval while moving
+    const SAVE_INTERVAL_MS = 1500;      // max one position write per interval while moving
+    const MIN_STATE_CHANGE_GAP_MS = 750; // start/stop moving is sent sooner than the normal interval
+    const MAX_EXTRAPOLATE_S = 2.5;      // never extrapolate a remote player further than this
+
+    // Moderator bot. One elected client (the "leader") simulates it and writes it as a
+    // normal position doc; everyone else renders it like any other player.
+    const MODERATOR_NAME = 'Moderator';
+    const BOT_ID = 'moderator_bot';
+    const MODERATOR_SCALE = 5;
+    const FACE_FORWARD_OFFSET = 0.45;   // local units; body radius is 0.35
+    const BOT_SPEED = 3.2;              // slower than players (MOVE_SPEED) so they can run away
+    const BOT_BODY_RADIUS = 0.35 * MODERATOR_SCALE;
+    const PUSH_OUT_RADIUS = BOT_BODY_RADIUS + 0.4; // players can't get closer than this (centre to centre)
+    const CATCH_DISTANCE = PUSH_OUT_RADIUS + 0.4;  // bot catches a player within this distance
+    const CATCH_COOLDOWN_MS = 15000;    // a caught player is skipped as a target for this long
+    const CATCH_PAUSE_MS = 1500;        // bot stops briefly after a catch
+    const RETARGET_MS = 500;            // how often the bot re-picks its closest target
+    const ACTIVE_MS = 2 * 60 * 1000;    // active player = seen this recently (heartbeat is 90s)
+    const LEASE_MS = 6000;              // leader lease; renewed on every bot write
+    const BOT_KEEPALIVE_MS = 3000;      // bot writes at least this often while leading
+    const BOT_SPAWN = { x: 0, z: -15 };
+    const CAUGHT_FREEZE_MS = 3000;      // caught players can't move, and the "you were caught" screen stays up, this long
     const HEARTBEAT_INTERVAL_MS = 90000; // keep lastSeen fresh while standing still
-    const STALE_MS = 5 * 60 * 1000;     // players not seen for this long are hidden
-    const MAX_REMOTE_PLAYERS = 30;      // cap on the listener query
+    const PRESENT_MS = 10 * 1000;       // moved within this long = "here now"; idle players are dimmed where they stand
+    const OFFLINE_OPACITY = 0.4;
+    const MAX_REMOTE_PLAYERS = 100;     // cap on the listener query (most recently seen first)
     const REMOTE_LERP_RATE = 8;         // higher = snappier interpolation
 
     function getIdentity() {
@@ -268,6 +308,8 @@
       z: (Math.random() - 0.5) * 6,
       yaw: 0,
       pitch: 0,
+      vx: 0, // current world-space velocity in units/second (0 when standing still)
+      vz: 0,
     };
     let positionLoaded = !identity; // spectators have nothing to load
     let lastSavedX = null;
@@ -443,12 +485,12 @@
       return tex;
     }
 
-    function makeNameSprite(name) {
+    function makeNameSprite(name, background) {
       const c = document.createElement('canvas');
       c.width = 256;
       c.height = 64;
       const ctx = c.getContext('2d');
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillStyle = background || 'rgba(0,0,0,0.55)';
       ctx.fillRect(0, 0, 256, 64);
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 30px sans-serif';
@@ -470,7 +512,9 @@
       for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
       const body = new THREE.Mesh(
         new THREE.CylinderGeometry(0.3, 0.35, 1.0, 16),
-        new THREE.MeshLambertMaterial({ color: new THREE.Color(`hsl(${Math.abs(hash) % 360}, 50%, 45%)`) })
+        new THREE.MeshLambertMaterial({
+          color: name === MODERATOR_NAME ? new THREE.Color(0xd01010) : new THREE.Color(`hsl(${Math.abs(hash) % 360}, 50%, 45%)`),
+        })
       );
       body.position.y = 0.5;
       group.add(body);
@@ -481,19 +525,28 @@
       face.position.y = 1.4;
       group.add(face);
 
-      const label = makeNameSprite(name);
+      const label = makeNameSprite(name, name === MODERATOR_NAME ? 'rgba(160,0,0,0.9)' : undefined);
       label.position.y = 2.1;
       group.add(label);
 
+      if (name === MODERATOR_NAME) group.scale.setScalar(MODERATOR_SCALE);
       group.position.set(data.x, 0, data.z);
       scene.add(group);
 
       return {
         group,
+        face,
         faceTex,
         avatarSrc: data.avatar,
+        name,
+        isBot: id === BOT_ID,
+        online: undefined,
+        lastActiveAt: -Infinity,
         targetX: data.x,
         targetZ: data.z,
+        vx: 0,
+        vz: 0,
+        updatedAt: performance.now(),
         lastSeen: 0,
       };
     }
@@ -519,58 +572,95 @@
       return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Date.now();
     }
 
+    function swapAvatar(p, src) {
+      const tex = makeAvatarTexture(src, p.name);
+      const old = p.face.material.map;
+      p.face.material.map = tex;
+      p.face.material.needsUpdate = true;
+      if (old) old.dispose();
+      p.faceTex = tex;
+      p.avatarSrc = src;
+    }
+
     function handlePositionDoc(doc) {
       if (identity && doc.id === identity.id) return; // that's me
       const data = doc.data({ serverTimestamps: 'estimate' });
       if (typeof data.x !== 'number' || typeof data.z !== 'number') return;
       const lastSeen = tsToMs(data.lastSeen);
-      if (Date.now() - lastSeen > STALE_MS) {
-        const old = remotePlayers.get(doc.id);
-        if (old) { disposeRemotePlayer(old); remotePlayers.delete(doc.id); }
-        return;
-      }
+      if (doc.id === BOT_ID) onBotDoc(data);
       let p = remotePlayers.get(doc.id);
+      let active;
       if (!p) {
         p = createRemotePlayer(doc.id, data);
         remotePlayers.set(doc.id, p);
+        // first sight of this player: judge by the server timestamp of their last write
+        active = Date.now() - lastSeen <= PRESENT_MS;
       } else {
+        // activity = they actually moved (heartbeat writes don't count)
+        active = Math.abs(data.x - p.targetX) > 0.05 || Math.abs(data.z - p.targetZ) > 0.05
+          || (typeof data.vx === 'number' && data.vx !== 0) || (typeof data.vz === 'number' && data.vz !== 0);
+      }
+      if (active) p.lastActiveAt = performance.now();
+      if (data.avatar && data.avatar !== p.avatarSrc) swapAvatar(p, data.avatar);
+      if (!(p.isBot && isLeader)) { // the leader drives the bot locally, not from its own echo
         p.targetX = data.x;
         p.targetZ = data.z;
+        p.vx = typeof data.vx === 'number' ? data.vx : 0; // docs from before velocity existed
+        p.vz = typeof data.vz === 'number' ? data.vz : 0;
+        p.updatedAt = performance.now();
       }
       p.lastSeen = lastSeen;
+      applyPresence(p);
     }
 
-    function pruneStalePlayers() {
-      const now = Date.now();
-      remotePlayers.forEach((p, id) => {
-        if (now - p.lastSeen > STALE_MS) {
-          disposeRemotePlayer(p);
-          remotePlayers.delete(id);
+    // Players who haven't moved recently stay where they are, dimmed.
+    function applyPresence(p) {
+      const online = p.isBot || performance.now() - p.lastActiveAt <= PRESENT_MS; // the Moderator never dims
+      if (p.online === online) return;
+      p.online = online;
+      const opacity = online ? 1 : OFFLINE_OPACITY;
+      p.group.traverse((obj) => {
+        if (obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = opacity;
+          obj.material.needsUpdate = true;
         }
       });
+    }
+
+    function refreshPresence() {
+      remotePlayers.forEach(applyPresence);
       updateOnlineCount();
     }
-    setInterval(pruneStalePlayers, 30000);
+    setInterval(refreshPresence, 1000);
 
     function updateOnlineCount() {
-      const others = remotePlayers.size;
-      const total = others + (identity ? 1 : 0);
+      let othersOnline = 0;
+      let others = 0;
+      remotePlayers.forEach((p) => {
+        if (p.isBot) return;
+        others++;
+        if (p.online) othersOnline++;
+      });
+      const total = othersOnline + (identity ? 1 : 0);
+      const away = others - othersOnline;
+      const awayText = away > 0 ? `, ${away} away` : '';
       hudOnline.textContent = total === 0
-        ? 'Nobody here right now'
-        : `${total} in the room${others > 0 ? '' : ' (just you)'}`;
+        ? `Nobody here right now${awayText}`
+        : `${total} here now${othersOnline > 0 || !identity ? '' : ' (just you)'}${awayText}`;
     }
 
     // ---- Firestore listener (paused when tab hidden to save reads) ----
     let unsubscribePositions = null;
+    let positionsReady = false;
 
     function startListening() {
       if (unsubscribePositions) return;
-      const cutoff = firebase.firestore.Timestamp.fromMillis(Date.now() - STALE_MS);
       unsubscribePositions = db.collection(POSITIONS_COLLECTION)
-        .where('lastSeen', '>', cutoff)
         .orderBy('lastSeen', 'desc')
         .limit(MAX_REMOTE_PLAYERS)
         .onSnapshot((snapshot) => {
+          positionsReady = true;
           snapshot.docChanges().forEach((change) => {
             if (change.type === 'removed') {
               const old = remotePlayers.get(change.doc.id);
@@ -585,6 +675,7 @@
         });
     }
     function stopListening() {
+      positionsReady = false;
       if (unsubscribePositions) {
         unsubscribePositions();
         unsubscribePositions = null;
@@ -617,18 +708,34 @@
     }
 
     let saving = false;
+    let lastSaveAt = 0;
+    let lastSavedMoving = false;
+
+    function isMovingNow() {
+      return me.vx !== 0 || me.vz !== 0;
+    }
+
     async function savePosition(force) {
       if (!identity || !positionLoaded || saving) return;
+      // Yaw alone (looking around while standing still) doesn't trigger a write;
+      // other players don't see it, it only restores your view on next login.
       const moved = lastSavedX === null
         || Math.abs(me.x - lastSavedX) > 0.05
         || Math.abs(me.z - lastSavedZ) > 0.05
-        || Math.abs(me.yaw - lastSavedYaw) > 0.05;
+        || isMovingNow() !== lastSavedMoving;
       if (!moved && !force) return;
       saving = true;
+      lastSaveAt = performance.now();
+      // A hidden tab isn't moving, whatever the last frame said.
+      const visible = document.visibilityState === 'visible';
+      const vx = visible ? me.vx : 0;
+      const vz = visible ? me.vz : 0;
       const payload = {
         x: me.x,
         z: me.z,
         yaw: me.yaw,
+        vx,
+        vz,
         lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
       };
       if (!sentProfile) {
@@ -641,6 +748,7 @@
         lastSavedX = me.x;
         lastSavedZ = me.z;
         lastSavedYaw = me.yaw;
+        lastSavedMoving = vx !== 0 || vz !== 0;
       } catch (e) {
         showStatus(describeFirestoreError("Couldn't save your position", e));
       } finally {
@@ -648,24 +756,260 @@
       }
     }
 
-    // Throttled save while moving
-    setInterval(() => {
-      if (document.visibilityState === 'visible') savePosition(false);
-    }, SAVE_INTERVAL_MS);
+    // Called every frame. Regular writes are throttled to SAVE_INTERVAL_MS; starting
+    // or stopping is sent sooner (MIN_STATE_CHANGE_GAP_MS) so other players don't
+    // keep extrapolating a player who has already stopped.
+    function maybeSave() {
+      if (!identity || !positionLoaded || saving) return;
+      if (document.visibilityState !== 'visible') return;
+      const sinceLast = performance.now() - lastSaveAt;
+      const gap = isMovingNow() !== lastSavedMoving ? MIN_STATE_CHANGE_GAP_MS : SAVE_INTERVAL_MS;
+      if (sinceLast >= gap) savePosition(false);
+    }
     // Heartbeat so a player standing still doesn't vanish for others
     setInterval(() => {
       if (document.visibilityState === 'visible') savePosition(true);
     }, HEARTBEAT_INTERVAL_MS);
 
+    // ---- Moderator bot (leader-elected) ----
+    let isLeader = false;
+    let botDoc = null;                       // latest raw bot doc data
+    const bot = { x: BOT_SPAWN.x, z: BOT_SPAWN.z, yaw: 0, vx: 0, vz: 0 };
+    const caughtAtById = {};                 // memberId -> ms timestamp of last catch (leader only)
+    let botTargetId = null;
+    let botRetargetAt = 0;
+    let botPausedUntil = 0;
+    let lastBotWriteAt = 0;
+    let lastBotMoving = false;
+    let botSaving = false;
+    let claiming = false;
+    let lastCaughtNoticeAt = 0;
+
+    const caughtOverlay = document.getElementById('caught-overlay');
+    let caughtTimer = null;
+    let frozenUntil = 0; // performance.now() time until which I can't move
+    function showCaughtOverlay() {
+      frozenUntil = performance.now() + CAUGHT_FREEZE_MS;
+      caughtOverlay.style.display = 'flex';
+      clearTimeout(caughtTimer);
+      caughtTimer = setTimeout(() => { caughtOverlay.style.display = 'none'; }, CAUGHT_FREEZE_MS);
+    }
+
+    function onBotDoc(data) {
+      botDoc = data;
+      if (isLeader && data.leaderId !== identity.id) stopLeading(); // someone else took the lease
+      if (identity && data.caughtId === identity.id && typeof data.caughtAt === 'number'
+          && data.caughtAt > lastCaughtNoticeAt && Date.now() - data.caughtAt < 15000) {
+        lastCaughtNoticeAt = data.caughtAt;
+        showCaughtOverlay();
+      }
+    }
+
+    function stopLeading() {
+      isLeader = false;
+      botTargetId = null;
+    }
+
+    async function tryClaimLeadership() {
+      if (!identity || !positionLoaded || !positionsReady || isLeader || claiming) return;
+      if (document.visibilityState !== 'visible') return;
+      if (botDoc && botDoc.leaseUntil > Date.now() && botDoc.leaderId !== identity.id) return;
+      claiming = true;
+      try {
+        const ref = db.collection(POSITIONS_COLLECTION).doc(BOT_ID);
+        let moderatorAvatar = null;
+        if (!(botDoc && botDoc.avatar)) {
+          try {
+            const q = await db.collection('bookclub_members').where('nameLower', '==', MODERATOR_NAME.toLowerCase()).limit(1).get();
+            if (!q.empty) moderatorAvatar = q.docs[0].data().avatar || null;
+          } catch (e) {
+            console.error("Couldn't load the Moderator's face", e);
+          }
+        }
+        const start = await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          const d = snap.exists ? snap.data() : null;
+          if (d && d.leaseUntil > Date.now() && d.leaderId !== identity.id) return null;
+          const sx = d && typeof d.x === 'number' ? d.x : BOT_SPAWN.x;
+          const sz = d && typeof d.z === 'number' ? d.z : BOT_SPAWN.z;
+          tx.set(ref, {
+            x: sx,
+            z: sz,
+            yaw: d && typeof d.yaw === 'number' ? d.yaw : 0,
+            vx: 0,
+            vz: 0,
+            name: MODERATOR_NAME,
+            leaderId: identity.id,
+            leaseUntil: Date.now() + LEASE_MS,
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+            ...(moderatorAvatar ? { avatar: moderatorAvatar } : {}),
+          }, { merge: true });
+          return { x: sx, z: sz, caughtId: d && d.caughtId, caughtAt: d && d.caughtAt };
+        });
+        if (start) {
+          bot.x = start.x;
+          bot.z = start.z;
+          bot.vx = 0;
+          bot.vz = 0;
+          if (start.caughtId && typeof start.caughtAt === 'number') caughtAtById[start.caughtId] = start.caughtAt;
+          lastBotWriteAt = performance.now();
+          lastBotMoving = false;
+          botTargetId = null;
+          botRetargetAt = 0;
+          isLeader = true;
+        }
+      } catch (e) {
+        console.error("Couldn't claim Moderator lease", e);
+      } finally {
+        claiming = false;
+      }
+    }
+    setInterval(tryClaimLeadership, 2000);
+
+    async function writeBot(extra) {
+      if (!isLeader || botSaving) return;
+      botSaving = true;
+      lastBotWriteAt = performance.now();
+      const moving = bot.vx !== 0 || bot.vz !== 0;
+      try {
+        await db.collection(POSITIONS_COLLECTION).doc(BOT_ID).set({
+          x: bot.x,
+          z: bot.z,
+          yaw: bot.yaw,
+          vx: bot.vx,
+          vz: bot.vz,
+          name: MODERATOR_NAME,
+          leaderId: identity.id,
+          leaseUntil: Date.now() + LEASE_MS,
+          lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+          ...extra,
+        }, { merge: true });
+        lastBotMoving = moving;
+      } catch (e) {
+        showStatus(describeFirestoreError("Couldn't save the Moderator", e));
+      } finally {
+        botSaving = false;
+      }
+    }
+
+    // Give the lease up immediately (tab hidden / closed) so another client takes over fast.
+    function releaseLeadership() {
+      if (!isLeader) return;
+      bot.vx = 0;
+      bot.vz = 0;
+      db.collection(POSITIONS_COLLECTION).doc(BOT_ID).set({
+        x: bot.x,
+        z: bot.z,
+        yaw: bot.yaw,
+        vx: 0,
+        vz: 0,
+        name: MODERATOR_NAME,
+        leaderId: identity.id,
+        leaseUntil: 0,
+        lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true }).catch(() => {});
+      stopLeading();
+    }
+
+    // Active players the bot can chase: me plus remote players seen recently (never the
+    // bot itself or a real Moderator).
+    function getBotCandidates() {
+      const now = Date.now();
+      const list = [];
+      if (identity) list.push({ id: identity.id, x: me.x, z: me.z });
+      remotePlayers.forEach((p, id) => {
+        if (p.isBot || p.name === MODERATOR_NAME) return;
+        if (now - p.lastSeen > ACTIVE_MS) return;
+        list.push({ id, x: p.group.position.x, z: p.group.position.z });
+      });
+      return list;
+    }
+
+    // "Next person" logic: skip anyone caught within CATCH_COOLDOWN_MS. If everyone has been
+    // caught recently, go for whoever was caught longest ago.
+    function pickBotTarget(candidates, now) {
+      if (candidates.length === 0) return null;
+      const fresh = candidates.filter((c) => now - (caughtAtById[c.id] || 0) > CATCH_COOLDOWN_MS);
+      if (fresh.length > 0) {
+        let best = fresh[0];
+        let bestDist = Infinity;
+        fresh.forEach((c) => {
+          const d = Math.hypot(c.x - bot.x, c.z - bot.z);
+          if (d < bestDist) { bestDist = d; best = c; }
+        });
+        return best;
+      }
+      return candidates.reduce((a, b) => ((caughtAtById[a.id] || 0) <= (caughtAtById[b.id] || 0) ? a : b));
+    }
+
+    function updateBot(dt) {
+      const now = Date.now();
+      const perfNow = performance.now();
+      const candidates = getBotCandidates();
+
+      if (perfNow >= botRetargetAt) {
+        const t = pickBotTarget(candidates, now);
+        botTargetId = t ? t.id : null;
+        botRetargetAt = perfNow + RETARGET_MS;
+      }
+      const target = candidates.find((c) => c.id === botTargetId);
+
+      bot.vx = 0;
+      bot.vz = 0;
+      if (target && now >= botPausedUntil) {
+        const dx = target.x - bot.x;
+        const dz = target.z - bot.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist <= CATCH_DISTANCE) {
+          caughtAtById[target.id] = now;
+          botPausedUntil = now + CATCH_PAUSE_MS;
+          botTargetId = null;
+          botRetargetAt = 0;
+          writeBot({ caughtId: target.id, caughtAt: now });
+        } else {
+          bot.vx = (dx / dist) * BOT_SPEED;
+          bot.vz = (dz / dist) * BOT_SPEED;
+          bot.yaw = Math.atan2(-dx, -dz);
+          const limit = HALF - BOT_BODY_RADIUS;
+          bot.x = Math.max(-limit, Math.min(limit, bot.x + bot.vx * dt));
+          bot.z = Math.max(-limit, Math.min(limit, bot.z + bot.vz * dt));
+        }
+      }
+
+      const moving = bot.vx !== 0 || bot.vz !== 0;
+      const since = perfNow - lastBotWriteAt;
+      const due = moving !== lastBotMoving
+        ? since >= MIN_STATE_CHANGE_GAP_MS
+        : (moving ? since >= SAVE_INTERVAL_MS : since >= BOT_KEEPALIVE_MS);
+      if (due) writeBot();
+    }
+
+    // Players can't walk into the giant Moderator.
+    function pushOutOfBot() {
+      const bp = remotePlayers.get(BOT_ID);
+      if (!bp) return;
+      const bx = isLeader ? bot.x : bp.group.position.x;
+      const bz = isLeader ? bot.z : bp.group.position.z;
+      let dx = me.x - bx;
+      let dz = me.z - bz;
+      let dist = Math.hypot(dx, dz);
+      if (dist >= PUSH_OUT_RADIUS) return;
+      if (dist < 0.001) { dx = 1; dz = 0; dist = 1; }
+      me.x = bx + (dx / dist) * PUSH_OUT_RADIUS;
+      me.z = bz + (dz / dist) * PUSH_OUT_RADIUS;
+      clampToRoom();
+    }
+
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         savePosition(true);
+        releaseLeadership();
         stopListening();
       } else {
         startListening();
       }
     });
-    window.addEventListener('pagehide', () => savePosition(true));
+    window.addEventListener('pagehide', () => { savePosition(true); releaseLeadership(); });
 
     // ---- Main loop ----
     const clock = new THREE.Clock();
@@ -673,26 +1017,54 @@
       requestAnimationFrame(frame);
       const dt = Math.min(clock.getDelta(), 0.1);
 
-      if (positionLoaded) {
+      me.vx = 0;
+      me.vz = 0;
+      if (positionLoaded && performance.now() >= frozenUntil) {
         const { forward, strafe } = getMoveInput();
         if (forward !== 0 || strafe !== 0) {
           const fx = -Math.sin(me.yaw);
           const fz = -Math.cos(me.yaw);
           const rx = Math.cos(me.yaw);
           const rz = -Math.sin(me.yaw);
-          me.x += (fx * forward + rx * strafe) * MOVE_SPEED * dt;
-          me.z += (fz * forward + rz * strafe) * MOVE_SPEED * dt;
+          me.vx = (fx * forward + rx * strafe) * MOVE_SPEED;
+          me.vz = (fz * forward + rz * strafe) * MOVE_SPEED;
+          me.x += me.vx * dt;
+          me.z += me.vz * dt;
           clampToRoom();
         }
       }
+      maybeSave();
+      if (isLeader) updateBot(dt);
+      pushOutOfBot();
 
       camera.position.set(me.x, EYE_HEIGHT, me.z);
       camera.rotation.set(me.pitch, me.yaw, 0);
 
-      const t = 1 - Math.exp(-REMOTE_LERP_RATE * dt);
+      // Keep each face just in front of its body from the camera's point of view, so the body
+      // can never cover it (matters most for the giant Moderator).
       remotePlayers.forEach((p) => {
-        p.group.position.x += (p.targetX - p.group.position.x) * t;
-        p.group.position.z += (p.targetZ - p.group.position.z) * t;
+        const dx = camera.position.x - p.group.position.x;
+        const dz = camera.position.z - p.group.position.z;
+        const len = Math.hypot(dx, dz) || 1;
+        p.face.position.set((dx / len) * FACE_FORWARD_OFFSET, 1.4, (dz / len) * FACE_FORWARD_OFFSET);
+      });
+
+      const t = 1 - Math.exp(-REMOTE_LERP_RATE * dt);
+      // Dead reckoning: project each remote player forward from their last update using
+      // their reported velocity, then ease toward that projected point.
+      const nowMs = performance.now();
+      const limit = HALF - PLAYER_MARGIN;
+      remotePlayers.forEach((p) => {
+        if (p.isBot && isLeader) { // the leader is the source of truth for the bot
+          p.group.position.x = bot.x;
+          p.group.position.z = bot.z;
+          return;
+        }
+        const elapsed = p.online ? Math.min((nowMs - p.updatedAt) / 1000, MAX_EXTRAPOLATE_S) : 0;
+        const px = Math.max(-limit, Math.min(limit, p.targetX + p.vx * elapsed));
+        const pz = Math.max(-limit, Math.min(limit, p.targetZ + p.vz * elapsed));
+        p.group.position.x += (px - p.group.position.x) * t;
+        p.group.position.z += (pz - p.group.position.z) * t;
       });
 
       renderer.render(scene, camera);

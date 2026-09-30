@@ -22,13 +22,29 @@
       z-index: -1;
     }
     .hidden { display: none; }
+    #world-banner {
+      display: inline-block;
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 999;
+      font-weight: bold;
+      text-decoration: none;
+      color: #d1004a;
+      background: #ffe3ee;
+      border: 2px solid #d1004a;
+      border-radius: 6px;
+      padding: 6px 14px;
+      transition: top 4s ease-in-out, left 4s ease-in-out;
+    }
+    #world-banner.hidden { display: none; }
     .comment { margin-bottom: 10px; }
   </style>
 </head>
 <body>
   <p><a href="/">&larr; Back home</a></p>
   <h1>Bookclub</h1>
-  <p><a href="/bookclub_world/">Enter the Bookclub World (3D)</a></p>
+  <a id="world-banner" class="hidden" href="/bookclub_world/">NEW: Moderator's World</a>
 
   <h2>Currently Reading</h2>
   <div id="current-book" data-react-id="book:current"><p>Loading...</p></div>
@@ -265,6 +281,7 @@
     function renderAuthWidget() {
       const widget = document.getElementById('auth-widget');
       const identity = getIdentity();
+      document.getElementById('world-banner').classList.toggle('hidden', !identity);
       document.body.style.background = identity && isModerator(identity.name) ? 'darkred' : '';
       if (window.BookclubReactions) BookclubReactions.refresh();
       if (identity) {
@@ -783,6 +800,17 @@
 
     renderAuthWidget();
     renderComposer();
+
+    // Bouncing "NEW" banner (same idea as the homepage one); only visible when logged in.
+    const worldBanner = document.getElementById('world-banner');
+    function moveWorldBanner() {
+      const maxLeft = Math.max(0, window.innerWidth - worldBanner.offsetWidth - 10);
+      const maxTop = Math.max(0, window.innerHeight - worldBanner.offsetHeight - 10);
+      worldBanner.style.left = `${10 + Math.random() * maxLeft}px`;
+      worldBanner.style.top = `${10 + Math.random() * maxTop}px`;
+    }
+    moveWorldBanner();
+    setInterval(moveWorldBanner, 5000);
   </script>
 
   <script>

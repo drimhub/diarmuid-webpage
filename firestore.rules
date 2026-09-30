@@ -26,7 +26,7 @@ service cloud.firestore {
     }
 
     // Bookclub World (bookclub_world/index.html)
-    // One doc per member: { x, z, yaw, lastSeen, name, avatar }. Written often, so
+    // One doc per member: { x, z, yaw, vx, vz, lastSeen, name, avatar } (+ bot lease/catch fields on moderator_bot). Written often, so
     // the shape is validated. Positions must be inside the room (40x40, +/-20).
     match /bookclub_world_positions/{id} {
       allow read: if true;
@@ -35,12 +35,19 @@ service cloud.firestore {
     }
 
     function validPosition(d) {
-      return d.keys().hasOnly(['x', 'z', 'yaw', 'lastSeen', 'name', 'avatar'])
+      return d.keys().hasOnly(['x', 'z', 'yaw', 'vx', 'vz', 'lastSeen', 'name', 'avatar', 'leaderId', 'leaseUntil', 'caughtId', 'caughtAt'])
         && d.keys().hasAll(['x', 'z', 'yaw', 'lastSeen'])
         && d.x is number && d.x >= -20 && d.x <= 20
         && d.z is number && d.z >= -20 && d.z <= 20
         && d.yaw is number
+        && (!('vx' in d) || (d.vx is number && d.vx >= -10 && d.vx <= 10))
+        && (!('vz' in d) || (d.vz is number && d.vz >= -10 && d.vz <= 10))
         && d.lastSeen == request.time
+        // Moderator bot fields (doc id moderator_bot): lease holder and last catch
+        && (!('leaderId' in d) || (d.leaderId is string && d.leaderId.size() <= 100))
+        && (!('leaseUntil' in d) || d.leaseUntil is number)
+        && (!('caughtId' in d) || (d.caughtId is string && d.caughtId.size() <= 100))
+        && (!('caughtAt' in d) || d.caughtAt is number)
         && (!('name' in d) || (d.name is string && d.name.size() > 0 && d.name.size() <= 40))
         && (!('avatar' in d) || (d.avatar is string && d.avatar.size() <= 100000));
     }

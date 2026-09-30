@@ -69,7 +69,7 @@ Target ID kinds in use:
 
 ### Firestore rules
 
-Rules live in `firestore.rules` (the old wide-open rule is gone; only the listed collections are reachable). Existing collections are still open read/write. `bookclub_reactions` is validated (emoji whitelist, Moderator-only 🤖, server timestamp, and the reacting member must exist and match the stored name). `bookclub_world_positions` is validated too (exact field set, x/z inside the room, `lastSeen` must be the server time, no deletes). **Any new collection must be added to `firestore.rules`.** Logging in as any member, including the Moderator, is intentional, so the rules are guard rails rather than identity checks. To deploy:
+Rules live in `firestore.rules` (the old wide-open rule is gone; only the listed collections are reachable). Existing collections are still open read/write. `bookclub_reactions` is validated (emoji whitelist, Moderator-only 🤖, server timestamp, and the reacting member must exist and match the stored name). `bookclub_world_positions` is validated too (exact field set including the bot lease/catch fields, x/z inside the room, vx/vz bounded, `lastSeen` must be the server time, no deletes). **Any new collection must be added to `firestore.rules`.** Logging in as any member, including the Moderator, is intentional, so the rules are guard rails rather than identity checks. To deploy:
 
 ```
 npm install -g firebase-tools   # once
@@ -83,20 +83,29 @@ Deploying only replaces the rules; it never changes or deletes data.
 
 A first-person 3D room at `/bookclub_world/`, built with Three.js (r128 from cdnjs) and the same Firebase project. Single static page, no build step.
 
-- **Room** — a 40x40 square room (floor, four walls, ceiling). Constants at the top of the script.
+- **Room** — a 40x40 square room, 14 high (floor, four walls, ceiling). Constants at the top of the script.
 - **Controls** — desktop: WASD/arrows to move, drag the mouse to look. Phone: floating joystick on the left half of the screen to move, drag on the right half to look.
 - **Landscape only on phones** — in portrait, touch devices see a full-screen "rotate your phone" overlay (CSS). On first touch it also tries a fullscreen + landscape orientation lock, which only works on Android Chrome; iOS relies on the overlay.
 - **Errors** — Firestore load/save/listener failures are shown in red in the HUD (a `permission-denied` error names the collection whose rules need fixing).
 - **Identity** — reuses the `/bookclub` login (`bookclubMember` in `localStorage`). Not logged in = spectator: can look around and see others but has no avatar and saves nothing.
 - **Avatars** — other players are a coloured body with their avatar as a camera-facing circular "face" sprite plus a name label.
-- **Persistence** — each member's position is stored in Firestore collection `bookclub_world_positions/{memberId}` as `{ x, z, yaw, lastSeen, name, avatar }` (x/z is the floor plane). On load the member resumes where they left off; first-time members spawn near the centre.
+- **Persistence** — each member's position is stored in Firestore collection `bookclub_world_positions/{memberId}` as `{ x, z, yaw, vx, vz, lastSeen, name, avatar }` (x/z is the floor plane, vx/vz the current velocity in units/second). On load the member resumes where they left off; first-time members spawn near the centre.
 - **Live positions and Firestore cost controls**
-  - Writes only happen when the player has moved, at most once every 3s, plus on tab hide/page hide and a 90s heartbeat while standing still. `name`/`avatar` are sent only on the first write of a session.
-  - The listener only queries players seen in the last 5 minutes (`lastSeen`), capped at 30, and is detached while the tab is hidden.
-  - Remote players are interpolated client-side, so low update rates still look smooth.
+  - Writes only happen when the player has moved, at most once every 1.5s (starting or stopping is sent after at least 0.75s), plus on tab hide/page hide and a 90s heartbeat while standing still. Looking around without moving doesn't write. `name`/`avatar` are sent only on the first write of a session.
+  - Every member who has ever been in the world stays visible at their last saved position. Players who moved in the last 10 seconds are "here now"; anyone idle longer is shown dimmed where they stand (no extrapolation). Activity is judged from position changes seen on this device's own clock (heartbeat writes don't count, and clock skew can't dim people); on first load it falls back to the stored timestamp. The Moderator never dims. The HUD shows both counts.
+  - The listener reads the 100 most recently seen positions (ordered by `lastSeen`) and is detached while the tab is hidden. Each (re)attach re-reads those docs once, so reads per session are roughly (members x tab returns) plus live updates.
+  - Each write includes the player's velocity; other clients dead-reckon (project forward from the last update, capped at 2.5s, clamped to the room) and ease toward that point, so a 1.5s update rate still looks smooth.
   - Reads scale roughly with (players online)² x write rate. This is fine for a small club; a large audience would need Realtime Database or a Durable Object instead.
+- **The Moderator bot** — while no real Moderator is logged in, a giant (5x) Moderator chases players around the room.
+  - **One leader simulates it.** It is stored as a normal position doc (`bookclub_world_positions/moderator_bot`, name `Moderator`) carrying `leaderId` and `leaseUntil`. One logged-in client at a time holds a 6s lease (claimed in a Firestore transaction when the lease has expired, renewed on each bot write), runs the chase at 60fps and writes the bot every 1.5s with velocity, like a player. Everyone else renders and smooths it like any other player. The lease is released when the leader's tab is hidden or closed so another client takes over quickly.
+  - **Chase logic** — the bot (3.2 units/s, slower than players at 4) goes for the closest active player (seen in the last 2 minutes, leader included). On a catch (within about 2.5 units) it stops for 1.5s, records `caughtId`/`caughtAt` (the caught player sees a "The Moderator caught you!" message), then moves on to the next person: anyone caught in the last 15s is skipped, and if everyone was caught recently it picks whoever was caught longest ago. With nobody active it stands still.
+  - **Look** — the Moderator has a red body and red name label, and its face is the avatar of the member named `Moderator` (looked up by the leader from `bookclub_members` when it claims the lease and stored on the bot doc; other clients swap the face in when it arrives). Falls back to a red "M" circle if there is no such member.
+  - **Caught screen** — the caught player gets a full-screen "YOU WERE CAUGHT BY THE MODERATOR. PLAY NICER" overlay and can't move for 3s (they can still look around).
+  - **Collision** — players are pushed out of the bot so they can't stand inside it. The room is 14 high so the giant fits.
+  - Lease timing uses each client's own clock, so large clock skew between devices could cause the lease to flap.
+  - Not built yet: stepping aside when a real Moderator logs in.
 - Needs the `bookclub_world_positions` rule in `firestore.rules` (see "Firestore rules" under Bookclub); the `lastSeen` single-field index is automatic.
-- Linked from `/bookclub`. Includes the same `version.json` reload check.
+- Linked from `/bookclub` by a bouncing "NEW: Moderator's World" banner (same style as the homepage's bookclub banner) that only shows when a member is logged in. Includes the same `version.json` reload check.
 
 ## `location-worker/`
 
