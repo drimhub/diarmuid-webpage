@@ -6,14 +6,15 @@ Diarmuid's personal website — a static site with a couple of small backend pie
 
 ```
 index.html                   Homepage (static HTML/CSS/JS, no build step)
-bookclub/index.html          /bookclub page (Firebase-backed book club app, see below)
+bookclub/index.html          /bookclub page (members, availability, discussion, reactions; see below)
+bookclub/reactions.js        Emoji reactions module used by the bookclub page
 bookclub_world/index.html    /bookclub_world/ 3D multiplayer room (Three.js + Firestore, see below)
 assets/                      Images and audio (HOTW mp3, gang.jpg background)
 assets/book-covers/          Cover images + manifest.json (array of filenames) for the bookclub page
 version.json                 { "version": ... } read by the homepage to force a reload on deploy
 _headers                     Cloudflare Pages header rules (disables caching)
-firestore.rules              Firestore security rules (deploy with the Firebase CLI, see below)
-firebase.json, .firebaserc   Firebase CLI config (project diarmuid-webpage)
+firestore.rules              Firestore security rules (deployed with the Firebase CLI)
+firebase.json, .firebaserc   Firebase CLI config (project: diarmuid-webpage)
 location-worker/             Cloudflare Worker + D1 backing the "Locations" map on the homepage
 tools/                       Local scratch/tooling (not part of the deployed site)
 ```
@@ -44,7 +45,39 @@ Single static page using the same Firebase project as the homepage (Firestore, c
 - **Discussion** — live comment feed (`bookclub_comments`).
 - Also includes an a-ads ad unit and the same `version.json` reload check as the homepage.
 
-Firestore collections: `bookclub_members`, `bookclub_availability`, `bookclub_comments`.
+Firestore collections: `bookclub_members`, `bookclub_availability`, `bookclub_comments`, `bookclub_reactions`.
+
+### Emoji reactions (`bookclub/reactions.js`)
+
+Any element with a `data-react-id="kind:id"` attribute automatically gets a reaction bar (emoji pills, a ＋ picker and a "who?" link that opens a list of who reacted, when, and with what). A `MutationObserver` keeps bars in sync when the page re-renders, so a new feature only needs to add the attribute.
+
+Target ID kinds in use:
+
+| Kind | Example | Where |
+|---|---|---|
+| `comment` | `comment:<docId>` | Each discussion comment |
+| `book` | `book:current` | Currently-reading block |
+| `date` | `date:2026-10-05` | Each row of Best Dates |
+| `feature` | `feature:play` | The "Watch the members play" button |
+| `avatar` | `avatar:<memberId>` | Profile picture in the profile modal only |
+| `bio` | `bio:<memberId>` | Bio in the profile modal only |
+
+- Mobile: pills and buttons are sized for touch, the picker is a 4-column grid that closes on scroll, and pressing and holding a pill (touch only) opens the who-reacted list filtered to that emoji, since phones have no hover tooltip.
+- Palette: 👍 ❤️ 😂 🔥 📚 😮 😢 🎉. The 🤖 reaction is Moderator-only, and the Moderator can use nothing else.
+- Storage: one doc per (target, member, reaction) in `bookclub_reactions`, id `<targetId>__<memberId>__<reaction>`, with `createdAt` set by the server. Clicking a reaction you already made deletes the doc.
+- Avatars are not stored on reactions; the "who?" modal looks them up from the members list.
+
+### Firestore rules
+
+Rules live in `firestore.rules` (the old wide-open rule is gone; only the listed collections are reachable). Existing collections are still open read/write. `bookclub_reactions` is validated (emoji whitelist, Moderator-only 🤖, server timestamp, and the reacting member must exist and match the stored name). `bookclub_world_positions` is validated too (exact field set, x/z inside the room, `lastSeen` must be the server time, no deletes). **Any new collection must be added to `firestore.rules`.** Logging in as any member, including the Moderator, is intentional, so the rules are guard rails rather than identity checks. To deploy:
+
+```
+npm install -g firebase-tools   # once
+firebase login                  # once
+firebase deploy --only firestore:rules
+```
+
+Deploying only replaces the rules; it never changes or deletes data.
 
 ## Bookclub World (`bookclub_world/index.html`)
 
@@ -62,7 +95,7 @@ A first-person 3D room at `/bookclub_world/`, built with Three.js (r128 from cdn
   - The listener only queries players seen in the last 5 minutes (`lastSeen`), capped at 30, and is detached while the tab is hidden.
   - Remote players are interpolated client-side, so low update rates still look smooth.
   - Reads scale roughly with (players online)² x write rate. This is fine for a small club; a large audience would need Realtime Database or a Durable Object instead.
-- Needs the `bookclub_world_positions` rule in `firestore.rules` (deployed, see "Firestore rules" below); the `lastSeen` single-field index is automatic.
+- Needs the `bookclub_world_positions` rule in `firestore.rules` (see "Firestore rules" under Bookclub); the `lastSeen` single-field index is automatic.
 - Linked from `/bookclub`. Includes the same `version.json` reload check.
 
 ## `location-worker/`
@@ -98,17 +131,6 @@ wrangler deploy
 ```
 
 The homepage auto-detects `localhost`/`127.0.0.1` and points at `http://localhost:8787/api/location` in that case; otherwise it calls the deployed worker at `https://diarmuid-location-api.diarmuidcoffey99.workers.dev/api/location`.
-
-## Firestore rules
-
-Rules live in `firestore.rules` and cover every collection the site uses (`comments`, `bookclub_members`, `bookclub_availability`, `bookclub_comments`, `bookclub_reactions`, `bookclub_world_positions`). Anything not listed is denied. There's no Firebase Auth, so the rules are guard rails that validate the shape of writes, not real access control. The older collections are open; `bookclub_reactions` and `bookclub_world_positions` validate writes (world positions: exact field set, x/z inside the room, `lastSeen` must be the server time, no deletes). **Any new collection must be added here.** Deploy with:
-
-```
-firebase login            # first time only
-firebase deploy --only firestore:rules
-```
-
-Deploying replaces whatever rules are live in the Firebase console.
 
 ## Deployment
 
