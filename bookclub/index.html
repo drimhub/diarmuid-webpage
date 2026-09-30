@@ -281,7 +281,7 @@
     function renderAuthWidget() {
       const widget = document.getElementById('auth-widget');
       const identity = getIdentity();
-      document.getElementById('world-banner').classList.toggle('hidden', !identity);
+      document.getElementById('world-banner').classList.toggle('hidden', !identity || isModerator(identity.name)); // the Moderator can't enter the world
       document.body.style.background = identity && isModerator(identity.name) ? 'darkred' : '';
       if (window.BookclubReactions) BookclubReactions.refresh();
       if (identity) {
