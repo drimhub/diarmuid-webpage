@@ -191,6 +191,20 @@
     const messageEl = document.getElementById('message');
     const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
+    // The Moderator member can't enter: only the chasing bot is the Moderator in here.
+    const entryIdentity = getIdentity();
+    if (entryIdentity && entryIdentity.name === MODERATOR_NAME) {
+      messageEl.textContent = "The Moderator isn't allowed in the Moderator's World. ";
+      const back = document.createElement('a');
+      back.href = '/bookclub';
+      back.textContent = 'Back to bookclub';
+      back.style.color = '#9cf';
+      messageEl.appendChild(back);
+      messageEl.style.display = 'flex';
+      document.getElementById('hud').style.display = 'none';
+      throw new Error('Moderator members cannot enter the world');
+    }
+
     const hudStatus = document.getElementById('hud-status');
     function showStatus(text) {
       hudStatus.textContent = text;
@@ -585,6 +599,7 @@
     function handlePositionDoc(doc) {
       if (identity && doc.id === identity.id) return; // that's me
       const data = doc.data({ serverTimestamps: 'estimate' });
+      if (data.name === MODERATOR_NAME && doc.id !== BOT_ID) return; // only the bot is the Moderator here
       if (typeof data.x !== 'number' || typeof data.z !== 'number') return;
       const lastSeen = tsToMs(data.lastSeen);
       if (doc.id === BOT_ID) onBotDoc(data);

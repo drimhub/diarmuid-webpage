@@ -105,7 +105,8 @@ A first-person 3D room at `/bookclub_world/`, built with Three.js (r128 from cdn
   - Lease timing uses each client's own clock, so large clock skew between devices could cause the lease to flap.
   - Not built yet: stepping aside when a real Moderator logs in.
 - Needs the `bookclub_world_positions` rule in `firestore.rules` (see "Firestore rules" under Bookclub); the `lastSeen` single-field index is automatic.
-- Linked from `/bookclub` by a bouncing "NEW: Moderator's World" banner (same style as the homepage's bookclub banner) that only shows when a member is logged in. Includes the same `version.json` reload check.
+- Linked from `/bookclub` by a bouncing "NEW: Moderator's World" banner (same style as the homepage's bookclub banner) that only shows when a member other than the Moderator is logged in.
+- **The Moderator member can't enter.** Logged in as `Moderator`, the page shows a "not allowed" message instead of loading (no rendering, no Firestore writes), and the banner is hidden. Any position doc named `Moderator` other than `moderator_bot` is ignored when rendering, so the only Moderator in the world is the chasing bot. Includes the same `version.json` reload check.
 
 ## `location-worker/`
 
