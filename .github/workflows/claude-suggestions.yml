@@ -1,6 +1,7 @@
 # Runs Claude Code on GitHub's machines to build an approved suggestion.
 # Triggers: the repo owner adds the "approved" label to an issue, or the repo
 # owner comments "@claude ..." on an issue or PR (e.g. to ask for changes).
+# Never runs on issues labelled "rejected".
 # Claude pushes a claude/... branch and comments a link to open the PR.
 # Rules for the agent live in the "Agent-built suggestions" section of CLAUDE.md.
 name: Claude builds suggestions
@@ -20,12 +21,13 @@ permissions:
 jobs:
   claude:
     if: >-
+      !contains(github.event.issue.labels.*.name, 'rejected') && (
       (github.event_name == 'issues' &&
         github.event.label.name == 'approved' &&
         github.event.sender.login == github.repository_owner) ||
       (github.event_name == 'issue_comment' &&
         github.event.comment.author_association == 'OWNER' &&
-        contains(github.event.comment.body, '@claude'))
+        contains(github.event.comment.body, '@claude')))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
