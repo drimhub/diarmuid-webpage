@@ -43,18 +43,13 @@ jobs:
           # Commits go through the GitHub API onto the claude/ branch, not git push.
           use_commit_signing: true
           # Best-effort guard rail; the real gate is the agent-path-guard check.
+          # Only patterns containing a "/" are anchored to the repo root. A bare
+          # filename like "index.html" would match in every folder, including the
+          # agent's own suggestions/<slug>/, so root files are left to the guard.
           settings: |
             {
               "permissions": {
                 "deny": [
-                  "Edit(./index.html)",
-                  "Edit(./README.md)",
-                  "Edit(./CLAUDE.md)",
-                  "Edit(./_headers)",
-                  "Edit(./version.json)",
-                  "Edit(./firestore.rules)",
-                  "Edit(./firebase.json)",
-                  "Edit(./.firebaserc)",
                   "Edit(./suggestions/index.html)",
                   "Edit(./bookclub/**)",
                   "Edit(./bookclub_world/**)",
