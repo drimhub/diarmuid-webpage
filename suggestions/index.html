@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Suggest a Feature</title>
+  <style>
+    body {
+      position: relative;
+      margin: 0;
+      padding: 0 16px;
+      font-family: sans-serif;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: url("../assets/gang.jpg");
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      opacity: 0.1;
+      z-index: -1;
+    }
+    main {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-top: 14px;
+    }
+    input[type="text"], textarea {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 8px;
+      font: inherit;
+    }
+    textarea {
+      min-height: 160px;
+    }
+    .hint {
+      color: #555;
+      font-size: 0.9em;
+    }
+    /* Honeypot: hidden from people, bots tend to fill it in */
+    .hp {
+      position: absolute;
+      left: -10000px;
+    }
+    #turnstile {
+      margin-top: 14px;
+    }
+    button {
+      margin-top: 14px;
+      padding: 8px 18px;
+      font: inherit;
+    }
+    #status.error {
+      color: #b00020;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="/">&larr; back</a></p>
+    <h1>Suggest a feature</h1>
+    <p>Got an idea for the site? Describe it below. If Diarmuid approves it, an AI agent builds it and it goes live.</p>
+    <p class="hint">Suggestions are posted publicly as issues on the site's GitHub repo, so don't include anything private.</p>
+
+    <form id="suggestion-form">
+      <label for="suggestion-title">Feature name</label>
+      <input type="text" id="suggestion-title" name="title" required maxlength="100" placeholder="e.g. Dark mode for the bookclub">
+
+      <label for="suggestion-description">What should it do?</label>
+      <textarea id="suggestion-description" name="description" required maxlength="3000" placeholder="Describe the feature. Where does it go, what does it look like, how does it work?"></textarea>
+
+      <label for="suggestion-name">Your name <span class="hint">(optional)</span></label>
+      <input type="text" id="suggestion-name" name="name" maxlength="50">
+
+      <div class="hp" aria-hidden="true">
+        <label for="suggestion-website">Website</label>
+        <input type="text" id="suggestion-website" name="website" tabindex="-1" autocomplete="off">
+      </div>
+
+      <div id="turnstile"></div>
+      <button type="submit" id="suggestion-submit">Send suggestion</button>
+    </form>
+    <p id="status" role="status"></p>
+
+    <section id="built">
+      <h2>Already built</h2>
+      <ul id="built-list"><li>Loading...</li></ul>
+    </section>
+  </main>
+
+  <script>
+    // Turnstile site keys are public. The localhost key is Cloudflare's test key, which always passes.
+    const TURNSTILE_SITE_KEY =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? '1x00000000000000000000AA'
+        : '0x4AAAAAAFL3lfZUwe_pwfpX';
+
+    let turnstileWidgetId = null;
+
+    function renderTurnstile() {
+      turnstileWidgetId = turnstile.render('#turnstile', { sitekey: TURNSTILE_SITE_KEY });
+    }
+
+    const form = document.getElementById('suggestion-form');
+    const submitButton = document.getElementById('suggestion-submit');
+    const status = document.getElementById('status');
+
+    function showStatus(text, isError) {
+      status.textContent = text;
+      status.className = isError ? 'error' : '';
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const token = turnstileWidgetId !== null ? turnstile.getResponse(turnstileWidgetId) : '';
+      if (!token) {
+        showStatus('Please complete the "are you human" check first.', true);
+        return;
+      }
+
+      submitButton.disabled = true;
+      showStatus('Sending...', false);
+      try {
+        const res = await fetch('/api/suggest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: document.getElementById('suggestion-title').value.trim(),
+            description: document.getElementById('suggestion-description').value.trim(),
+            name: document.getElementById('suggestion-name').value.trim(),
+            website: document.getElementById('suggestion-website').value,
+            token,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+
+        form.reset();
+        showStatus('Thanks! Your suggestion was sent. ', false);
+        if (typeof data.url === 'string' && data.url.startsWith('https://github.com/')) {
+          const link = document.createElement('a');
+          link.href = data.url;
+          link.textContent = 'Follow it on GitHub';
+          status.appendChild(link);
+        }
+      } catch (err) {
+        showStatus(`Couldn't send your suggestion: ${err.message}`, true);
+      } finally {
+        submitButton.disabled = false;
+        if (turnstileWidgetId !== null) turnstile.reset(turnstileWidgetId);
+      }
+    });
+  </script>
+  <script>
+    // suggestions/features.json is written by the agent: [{ slug, title, issue }]
+    async function renderBuiltFeatures() {
+      const list = document.getElementById('built-list');
+      try {
+        const res = await fetch('/suggestions/features.json', { cache: 'no-store' });
+        const features = await res.json();
+        list.innerHTML = '';
+        const valid = (Array.isArray(features) ? features : [])
+          .filter(f => f && typeof f.slug === 'string' && /^[a-z0-9-]+$/.test(f.slug));
+        if (valid.length === 0) {
+          list.innerHTML = '<li>Nothing yet. Be the first!</li>';
+          return;
+        }
+        for (const f of valid) {
+          const li = document.createElement('li');
+          const link = document.createElement('a');
+          link.href = `/suggestions/${f.slug}/`;
+          link.textContent = typeof f.title === 'string' ? f.title : f.slug;
+          li.appendChild(link);
+          if (Number.isInteger(f.issue)) {
+            const issue = document.createElement('a');
+            issue.href = `https://github.com/drimhub/diarmuid-webpage/issues/${f.issue}`;
+            issue.textContent = `#${f.issue}`;
+            li.append(' (suggested in ', issue, ')');
+          }
+          list.appendChild(li);
+        }
+      } catch (e) {
+        list.innerHTML = "<li>Couldn't load the list.</li>";
+      }
+    }
+    renderBuiltFeatures();
+  </script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=renderTurnstile&render=explicit" async defer></script>
+
+  <script>
+    async function checkForNewVersion() {
+      try {
+        const res = await fetch('/version.json?_=' + Date.now(), { cache: 'no-store' });
+        const { version } = await res.json();
+        const seen = localStorage.getItem('siteVersion');
+        localStorage.setItem('siteVersion', version);
+        if (seen && seen !== version) {
+          location.href = location.pathname + '?v=' + version;
+          return;
+        }
+      } catch (e) {
+        // offline or fetch blocked — nothing to do
+      }
+    }
+    checkForNewVersion();
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) checkForNewVersion();
+    });
+  </script>
+</body>
+</html>
