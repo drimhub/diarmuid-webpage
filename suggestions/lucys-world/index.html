@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lucy's world ✨</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="back" href="/suggestions/">← back</a>
+<h1>✨ Lucy's world ✨</h1>
+<p class="sub">🐂 young bulls and 🐗 feral hogs, playing nicely together 💖</p>
+
+<div id="meadow" aria-label="Meadow with playing bulls and hogs">
+  <span class="deco" style="left:8%;top:12%">☁️</span>
+  <span class="deco" style="left:62%;top:6%">☁️</span>
+  <span class="deco" style="left:85%;top:20%">🌈</span>
+  <span class="deco" style="left:20%;bottom:6%">🌸</span>
+  <span class="deco" style="left:55%;bottom:4%">🌼</span>
+  <span class="deco" style="left:90%;bottom:8%">🌷</span>
+</div>
+<p class="hint">Tap an animal to make it hop! Tap an emoji to share some love.</p>
+
+<div id="emojis" class="emojis"></div>
+
+<form id="form" autocomplete="off">
+  <input id="name" maxlength="20" placeholder="your name" aria-label="Your name">
+  <input id="msg" maxlength="120" placeholder="say something sweet…" aria-label="Comment" required>
+  <button type="submit">💬 Send</button>
+</form>
+<ul id="feed"></ul>
+<p class="note">Comments and emojis only last until you leave this page.</p>
+<script src="script.js"></script>
+</body>
+</html>
