@@ -60,6 +60,34 @@
     #status.error {
       color: #b00020;
     }
+    #suggestion-list {
+      list-style: none;
+      padding: 0;
+    }
+    #suggestion-list li {
+      padding: 10px 0;
+      border-bottom: 1px solid #ddd;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.8em;
+      font-weight: bold;
+      padding: 2px 8px;
+      margin-right: 6px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+    .badge-pending { background: #eee; color: #444; }
+    .badge-approved { background: #fff3c4; color: #7a5a00; }
+    .badge-built { background: #d8f5dd; color: #136c2e; }
+    .badge-rejected { background: #fde0e0; color: #9b1c1c; }
+    .reason {
+      margin: 6px 0 0;
+      padding-left: 10px;
+      border-left: 3px solid #e7a3a3;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
   </style>
 </head>
 <body>
@@ -89,9 +117,9 @@
     </form>
     <p id="status" role="status"></p>
 
-    <section id="built">
-      <h2>Already built</h2>
-      <ul id="built-list"><li>Loading...</li></ul>
+    <section id="suggestions">
+      <h2>Suggestions so far</h2>
+      <ul id="suggestion-list"><li>Loading...</li></ul>
     </section>
   </main>
 
@@ -143,7 +171,7 @@
         if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
 
         form.reset();
-        showStatus('Thanks! Your suggestion was sent. ', false);
+        showStatus('Thanks! Your suggestion was sent and will show in the list below within a minute. ', false);
         if (typeof data.url === 'string' && data.url.startsWith('https://github.com/')) {
           const link = document.createElement('a');
           link.href = data.url;
@@ -159,38 +187,66 @@
     });
   </script>
   <script>
-    // suggestions/features.json is written by the agent: [{ slug, title, issue }]
-    async function renderBuiltFeatures() {
-      const list = document.getElementById('built-list');
+    // /api/suggestions (functions/api/suggestions.js): [{ number, title, status, url, slug, reason }]
+    const STATUS_LABELS = {
+      pending: "Pending review",
+      approved: "Approved, being built",
+      built: "Built",
+      rejected: "Rejected",
+    };
+
+    async function renderSuggestions() {
+      const list = document.getElementById("suggestion-list");
       try {
-        const res = await fetch('/suggestions/features.json', { cache: 'no-store' });
-        const features = await res.json();
-        list.innerHTML = '';
-        const valid = (Array.isArray(features) ? features : [])
-          .filter(f => f && typeof f.slug === 'string' && /^[a-z0-9-]+$/.test(f.slug));
-        if (valid.length === 0) {
-          list.innerHTML = '<li>Nothing yet. Be the first!</li>';
+        const res = await fetch("/api/suggestions");
+        const suggestions = await res.json();
+        if (!res.ok || !Array.isArray(suggestions)) throw new Error();
+        list.innerHTML = "";
+        if (suggestions.length === 0) {
+          list.innerHTML = "<li>Nothing yet. Be the first!</li>";
           return;
         }
-        for (const f of valid) {
-          const li = document.createElement('li');
-          const link = document.createElement('a');
-          link.href = `/suggestions/${f.slug}/`;
-          link.textContent = typeof f.title === 'string' ? f.title : f.slug;
-          li.appendChild(link);
-          if (Number.isInteger(f.issue)) {
-            const issue = document.createElement('a');
-            issue.href = `https://github.com/drimhub/diarmuid-webpage/issues/${f.issue}`;
-            issue.textContent = `#${f.issue}`;
-            li.append(' (suggested in ', issue, ')');
+        for (const s of suggestions) {
+          if (!STATUS_LABELS[s.status]) continue;
+          const li = document.createElement("li");
+
+          const badge = document.createElement("span");
+          badge.className = `badge badge-${s.status}`;
+          badge.textContent = STATUS_LABELS[s.status];
+          li.appendChild(badge);
+
+          const title = String(s.title || "Untitled");
+          if (s.status === "built" && typeof s.slug === "string" && /^[a-z0-9-]+$/.test(s.slug)) {
+            const link = document.createElement("a");
+            link.href = `/suggestions/${s.slug}/`;
+            link.textContent = title;
+            li.appendChild(link);
+          } else {
+            const strong = document.createElement("strong");
+            strong.textContent = title;
+            li.appendChild(strong);
+          }
+
+          if (typeof s.url === "string" && s.url.startsWith("https://github.com/")) {
+            const issue = document.createElement("a");
+            issue.href = s.url;
+            issue.textContent = `#${s.number}`;
+            li.append(" ", issue);
+          }
+
+          if (s.status === "rejected" && s.reason) {
+            const reason = document.createElement("p");
+            reason.className = "reason";
+            reason.textContent = String(s.reason);
+            li.appendChild(reason);
           }
           list.appendChild(li);
         }
       } catch (e) {
-        list.innerHTML = "<li>Couldn't load the list.</li>";
+        list.innerHTML = "<li>Couldn't load suggestions.</li>";
       }
     }
-    renderBuiltFeatures();
+    renderSuggestions();
   </script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=renderTurnstile&render=explicit" async defer></script>
 

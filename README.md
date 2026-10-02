@@ -9,11 +9,12 @@ index.html                   Homepage (static HTML/CSS/JS, no build step)
 bookclub/index.html          /bookclub page (members, availability, discussion, reactions; see below)
 bookclub/reactions.js        Emoji reactions module used by the bookclub page
 bookclub_world/index.html    /bookclub_world/ 3D multiplayer room (Three.js + Firestore, see below)
-suggestions/index.html       /suggestions/ feature suggestion form + list of built features (see below)
+suggestions/index.html       /suggestions/ feature suggestion form + list of suggestions and their status (see below)
 suggestions/features.json    Features built by the agent: [{ slug, title, issue }]
 suggestions/<slug>/          Agent-built feature pages, one folder each
 functions/api/suggest.js     Cloudflare Pages Function: form → GitHub issue
-.github/workflows/           Claude agent workflow + path guard for agent PRs
+functions/api/suggestions.js Cloudflare Pages Function: public list of suggestions + status
+.github/workflows/           Claude agent workflow, path guard for agent PRs, close-on-reject
 assets/                      Images and audio (HOTW mp3, gang.jpg background)
 assets/book-covers/          Cover images + manifest.json (array of filenames) for the bookclub page
 version.json                 { "version": ... } read by the homepage to force a reload on deploy
@@ -126,8 +127,13 @@ form on /suggestions/ ──POST──▶ functions/api/suggest.js (Turnstile ch
    ──▶ agent-path-guard check must pass ──▶ owner merges into main ──▶ live
 ```
 
-- **Form** (`suggestions/index.html`): feature name, description and an optional name, plus a honeypot field and a Cloudflare Turnstile widget. It also lists built features from `suggestions/features.json`. The Turnstile site key is a constant in the page; on localhost it uses Cloudflare's always-pass test key.
+- **Form** (`suggestions/index.html`): feature name, description and an optional name, plus a honeypot field and a Cloudflare Turnstile widget. Below the form it lists suggestions from `/api/suggestions` with a status badge. Built suggestions link to their page, and rejected ones show the rejection reason. The Turnstile site key is a constant in the page; on localhost it uses Cloudflare's always-pass test key.
 - **Pages Function** (`functions/api/suggest.js`, served at `/api/suggest`): validates lengths, verifies Turnstile, then creates the issue through the GitHub API. Visitor text is wrapped in code fences so it can't @mention people or render links/images. Needs the `GITHUB_TOKEN` and `TURNSTILE_SECRET` secrets.
+- **Suggestion list** (`functions/api/suggestions.js`, served at `/api/suggestions`): reads up to 100 `suggestion` issues with `GITHUB_TOKEN` and caches the result for 60s, so changes take up to a minute to show.
+  - Status, in priority order: **built** (issue number listed in `suggestions/features.json` on the live site), **rejected** (`rejected` label), **approved** (`approved` label, still open), **pending** (open, no label).
+  - Closed issues that are neither built nor rejected are hidden, so **closing an issue hides it** (use this for spam). Pending suggestions show up without review, so close rude ones quickly.
+  - The rejection reason is the repo owner's (`drimhub`) latest comment on the issue that doesn't mention `@claude`. Other people's comments are never shown, since anyone can comment on a public repo. Shown as plain text.
+- **Rejecting** (`.github/workflows/suggestion-rejected.yml`): when the owner adds `rejected`, the issue is closed as "not planned". Removing the label reopens it. The agent workflow never runs on an issue labelled `rejected`.
 - **Agent** (`.github/workflows/claude-suggestions.yml`): only runs for the repo owner (label added by, or comment from, the owner). It uses Anthropic's `claude-code-action` with the owner's Claude subscription. The agent's rules are the "Agent-built suggestions" section of `CLAUDE.md`. Commenting `@claude ...` on the issue or PR asks it for changes.
 - **Sandbox**: agent PRs may only touch `suggestions/<slug>/**` and `suggestions/features.json`.
   - `agent-path-guard.yml` enforces this. It runs on PRs from `claude/` branches into `main` and fails if any other path changes, if added lines mention `firebase`, `firestore`, `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie` or `bookclub`, or if `features.json` is invalid. It uses `pull_request_target`, so the check always runs as it is on `main` and an agent can't weaken it.
@@ -140,7 +146,7 @@ form on /suggestions/ ──POST──▶ functions/api/suggest.js (Turnstile ch
 1. **Turnstile**: in the Cloudflare dashboard → Turnstile, add a widget for `diarmu.id`. Put the **site key** in `TURNSTILE_SITE_KEY` in `suggestions/index.html`.
 2. **GitHub token for the form**: create a fine-grained personal access token with access to **only** `drimhub/diarmuid-webpage` and permission **Issues: Read and write** (nothing else). Tokens expire, so renew it when it does (the form shows "Could not save the suggestion" once it's expired).
 3. **Pages secrets**: Cloudflare dashboard → Pages project → Settings → Variables and Secrets. Add `GITHUB_TOKEN` and `TURNSTILE_SECRET` as encrypted secrets for Production (and Preview if you want to test there).
-4. **Labels**: create `suggestion` and `approved` labels in the GitHub repo.
+4. **Labels**: create `suggestion`, `approved` and `rejected` labels in the GitHub repo (Issues tab → Labels).
 5. **Claude GitHub app**: install https://github.com/apps/claude on the repo.
 6. **Claude subscription token**: run `claude setup-token` locally and save the result as the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (repo → Settings → Secrets and variables → Actions).
 7. **Branch rulesets** (repo → Settings → Rules → Rulesets):
@@ -154,6 +160,11 @@ form on /suggestions/ ──POST──▶ functions/api/suggest.js (Turnstile ch
 2. Add the `approved` label. The Action run shows under the repo's Actions tab, and Claude comments progress on the issue.
 3. Open the branch's Cloudflare preview, then create the PR from Claude's link. Ask for changes with `@claude ...` comments.
 4. Merge once `path-guard` passes and you're happy with it.
+
+### Rejecting a suggestion
+
+1. Comment your reason on the issue (don't mention `@claude` in it). This text is shown publicly on `/suggestions/`.
+2. Add the `rejected` label. The issue closes automatically. If an agent PR exists for it, close the PR and delete its branch.
 
 ### Local development
 
