@@ -1,0 +1,23 @@
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: #000080 repeating-linear-gradient(45deg, #000080 0 20px, #1a1aa0 20px 40px);
+  font-family: "Comic Sans MS", "Comic Sans", cursive;
+  color: #fff;
+}
+.back {
+  position: fixed; top: 8px; left: 8px; z-index: 10;
+  color: #ff0; background: #000; padding: 4px 8px; text-decoration: underline;
+}
+.clock {
+  position: fixed; top: 8px; right: 8px; left: 90px; z-index: 10;
+  text-align: right; font-family: "Courier New", monospace;
+  color: #0f0; background: #000; border: 3px ridge #0f0;
+  padding: 4px 8px; font-size: clamp(12px, 3.5vw, 22px);
+}
+.stage { position: fixed; inset: 0; }
+.word {
+  position: absolute; left: 0; top: 0; white-space: nowrap; font-weight: bold;
+  font-size: clamp(18px, 5vw, 36px); text-shadow: 2px 2px #000; will-change: transform;
+}
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (prefers-reduced-motion: reduce) { .word { transition: none; } }
