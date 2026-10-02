@@ -9,6 +9,11 @@ index.html                   Homepage (static HTML/CSS/JS, no build step)
 bookclub/index.html          /bookclub page (members, availability, discussion, reactions; see below)
 bookclub/reactions.js        Emoji reactions module used by the bookclub page
 bookclub_world/index.html    /bookclub_world/ 3D multiplayer room (Three.js + Firestore, see below)
+suggestions/index.html       /suggestions/ feature suggestion form + list of built features (see below)
+suggestions/features.json    Features built by the agent: [{ slug, title, issue }]
+suggestions/<slug>/          Agent-built feature pages, one folder each
+functions/api/suggest.js     Cloudflare Pages Function: form → GitHub issue
+.github/workflows/           Claude agent workflow + path guard for agent PRs
 assets/                      Images and audio (HOTW mp3, gang.jpg background)
 assets/book-covers/          Cover images + manifest.json (array of filenames) for the bookclub page
 version.json                 { "version": ... } read by the homepage to force a reload on deploy
@@ -108,6 +113,52 @@ A first-person 3D room at `/bookclub_world/`, built with Three.js (r128 from cdn
 - Linked from `/bookclub` by a bouncing "NEW: Moderator's World" banner (same style as the homepage's bookclub banner) that only shows when a member other than the Moderator is logged in.
 - **The Moderator member can't enter.** Logged in as `Moderator`, the page shows a "not allowed" message instead of loading (no rendering, no Firestore writes), and the banner is hidden. Any position doc named `Moderator` other than `moderator_bot` is ignored when rendering, so the only Moderator in the world is the chasing bot. Includes the same `version.json` reload check.
 
+## Suggestions (`suggestions/`)
+
+Visitors suggest features, Diarmuid approves them, and a Claude Code agent builds them in a GitHub Action.
+
+```
+form on /suggestions/ ──POST──▶ functions/api/suggest.js (Turnstile check)
+   ──▶ GitHub issue labelled "suggestion"   (repo is public, so issues are public)
+   ──▶ owner adds label "approved" (or comments "@claude ...")
+   ──▶ .github/workflows/claude-suggestions.yml: Claude builds suggestions/<slug>/ on a claude/... branch
+   ──▶ Cloudflare Pages preview deploy of that branch; Claude comments a "Create PR" link
+   ──▶ agent-path-guard check must pass ──▶ owner merges into main ──▶ live
+```
+
+- **Form** (`suggestions/index.html`): feature name, description and an optional name, plus a honeypot field and a Cloudflare Turnstile widget. It also lists built features from `suggestions/features.json`. The Turnstile site key is a constant in the page; on localhost it uses Cloudflare's always-pass test key.
+- **Pages Function** (`functions/api/suggest.js`, served at `/api/suggest`): validates lengths, verifies Turnstile, then creates the issue through the GitHub API. Visitor text is wrapped in code fences so it can't @mention people or render links/images. Needs the `GITHUB_TOKEN` and `TURNSTILE_SECRET` secrets.
+- **Agent** (`.github/workflows/claude-suggestions.yml`): only runs for the repo owner (label added by, or comment from, the owner). It uses Anthropic's `claude-code-action` with the owner's Claude subscription. The agent's rules are the "Agent-built suggestions" section of `CLAUDE.md`. Commenting `@claude ...` on the issue or PR asks it for changes.
+- **Sandbox**: agent PRs may only touch `suggestions/<slug>/**` and `suggestions/features.json`.
+  - `agent-path-guard.yml` enforces this. It runs on PRs from `claude/` branches into `main` and fails if any other path changes, if added lines mention `firebase`, `firestore`, `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie` or `bookclub`, or if `features.json` is invalid. It uses `pull_request_target`, so the check always runs as it is on `main` and an agent can't weaken it.
+  - The storage check exists because agent pages are served from the same origin as the bookclub, so they could otherwise read the bookclub login or write to the open Firestore collections.
+  - The workflow's Claude Code deny rules are an extra best-effort layer, not the guarantee.
+- **Agent pages** are plain static pages with no storage. A suggestion that needs saved data has to be built by hand.
+
+### One-time setup
+
+1. **Turnstile**: in the Cloudflare dashboard → Turnstile, add a widget for `diarmu.id`. Put the **site key** in `TURNSTILE_SITE_KEY` in `suggestions/index.html`.
+2. **GitHub token for the form**: create a fine-grained personal access token with access to **only** `drimhub/diarmuid-webpage` and permission **Issues: Read and write** (nothing else). Tokens expire, so renew it when it does (the form shows "Could not save the suggestion" once it's expired).
+3. **Pages secrets**: Cloudflare dashboard → Pages project → Settings → Variables and Secrets. Add `GITHUB_TOKEN` and `TURNSTILE_SECRET` as encrypted secrets for Production (and Preview if you want to test there).
+4. **Labels**: create `suggestion` and `approved` labels in the GitHub repo.
+5. **Claude GitHub app**: install https://github.com/apps/claude on the repo.
+6. **Claude subscription token**: run `claude setup-token` locally and save the result as the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (repo → Settings → Secrets and variables → Actions).
+7. **Branch rulesets** (repo → Settings → Rules → Rulesets):
+   - `main`: require a pull request before merging, and require the status check `path-guard`. Agent PRs can't be merged without passing the guard. The check is skipped (which counts as passing) for non-agent PRs such as `dev` → `main`. Add **Repository admin** as a bypass "for pull requests only". Until `agent-path-guard.yml` is on `main` the check never reports, so the first merge (and any PR that edits the workflow) needs that bypass.
+   - All branches except `claude/**`: restrict updates and deletions, with **Repository admin** as a bypass. You can still push to `dev` and `main`, but the agent can only write to `claude/` branches.
+8. **Previews**: in the Pages project, make sure preview deployments are enabled for all non-production branches, so each `claude/...` branch gets a preview URL.
+
+### Approving a suggestion
+
+1. Read the issue and treat it as untrusted. Comment with how you want it interpreted (your comments take priority over the visitor's text).
+2. Add the `approved` label. The Action run shows under the repo's Actions tab, and Claude comments progress on the issue.
+3. Open the branch's Cloudflare preview, then create the PR from Claude's link. Ask for changes with `@claude ...` comments.
+4. Merge once `path-guard` passes and you're happy with it.
+
+### Local development
+
+`wrangler pages dev .` serves the site with the function at `http://localhost:8788`. Add `GITHUB_TOKEN` and `TURNSTILE_SECRET` to the root `.dev.vars`; Cloudflare's test secret `1x0000000000000000000000000000000AA` always passes.
+
 ## `location-worker/`
 
 A Cloudflare Worker exposing `GET/POST /api/location`, backed by a Cloudflare D1 database.
@@ -144,4 +195,4 @@ The homepage auto-detects `localhost`/`127.0.0.1` and points at `http://localhos
 
 ## Deployment
 
-The site itself is deployed via Cloudflare Pages (static hosting of the repo root); `_headers` disables caching so the version-check reload logic always sees fresh content. The Worker in `location-worker/` is deployed separately via `wrangler deploy`.
+The site itself is deployed via Cloudflare Pages (static hosting of the repo root, from `main`); `_headers` disables caching so the version-check reload logic always sees fresh content. Pages also deploys `functions/` as Pages Functions. The Worker in `location-worker/` is deployed separately via `wrangler deploy`.
