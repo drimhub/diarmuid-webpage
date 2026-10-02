@@ -144,7 +144,7 @@ form on /suggestions/ ──POST──▶ functions/api/suggest.js (Turnstile ch
 5. **Claude GitHub app**: install https://github.com/apps/claude on the repo.
 6. **Claude subscription token**: run `claude setup-token` locally and save the result as the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (repo → Settings → Secrets and variables → Actions).
 7. **Branch rulesets** (repo → Settings → Rules → Rulesets):
-   - `main`: require a pull request before merging, and require the status check `path-guard`. Agent PRs can't be merged without passing the guard. The check is skipped (which counts as passing) for non-agent PRs such as `dev` → `main`.
+   - `main`: require a pull request before merging, and require the status check `path-guard`. Agent PRs can't be merged without passing the guard. The check is skipped (which counts as passing) for non-agent PRs such as `dev` → `main`. Add **Repository admin** as a bypass "for pull requests only". Until `agent-path-guard.yml` is on `main` the check never reports, so the first merge (and any PR that edits the workflow) needs that bypass.
    - All branches except `claude/**`: restrict updates and deletions, with **Repository admin** as a bypass. You can still push to `dev` and `main`, but the agent can only write to `claude/` branches.
 8. **Previews**: in the Pages project, make sure preview deployments are enabled for all non-production branches, so each `claude/...` branch gets a preview URL.
 
