@@ -31,7 +31,11 @@ Single static page, no build tooling — just open it or deploy the folder as-is
 
 - **Heat of the Month** — an audio player for `assets/HOTW 1.mp3`.
 - **Top Songs (last 7 days)** — fetched client-side from the Last.fm API for user `diarmuidcoffey`.
-- **Locations** — a Leaflet map plotting points fetched from the `location-worker` API (see below).
+- **Locations** — a Leaflet map plotting points fetched from the `location-worker` API (see below). All client-side, no Worker changes:
+  - The trail is drawn as per-segment lines and small dots that fade and shift from blue (oldest) to red (newest) within the points currently shown; the latest shown point is a larger pulsing marker.
+  - Range buttons (24h / 7d / 30d / All, relative to now) filter the points and re-fit the map. A slider scrubs through the filtered points in time order, and ▶ Play animates it (about 10s end to end).
+  - Tapping a point shows its time in a popup. There are no place names, as that would need reverse geocoding.
+  - Timestamps without a zone (D1 `YYYY-MM-DD HH:MM:SS`) are treated as UTC and shown in the viewer's local time.
 - **Comments** — a simple guestbook backed directly by Firebase Firestore from the client.
 - **Version check** — polls `version.json` and reloads the page when the version changes, to bust caching.
 - A bouncing "NEW: bookclub" banner linking to `/bookclub`.
