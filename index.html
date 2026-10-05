@@ -36,6 +36,14 @@
       padding: 6px 14px;
       transition: top 4s ease-in-out, left 4s ease-in-out;
     }
+    #location-controls { margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    #location-controls button.active { font-weight: bold; background: #3388ff; color: #fff; }
+    #location-scrub { flex: 1 1 200px; min-width: 120px; }
+    .loc-now { width: 18px; height: 18px; border-radius: 50%; background: #d1004a; border: 2px solid #fff; box-shadow: 0 0 0 0 rgba(209, 0, 74, 0.7); animation: loc-pulse 1.8s infinite; }
+    @keyframes loc-pulse {
+      70% { box-shadow: 0 0 0 14px rgba(209, 0, 74, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(209, 0, 74, 0); }
+    }
   </style>
 </head>
 <body>
@@ -56,6 +64,14 @@
 
   <section id="location">
     <h2>Locations</h2>
+    <div id="location-controls" hidden>
+      <button type="button" data-range="24">24h</button>
+      <button type="button" data-range="168">7d</button>
+      <button type="button" data-range="720">30d</button>
+      <button type="button" data-range="all" class="active">All</button>
+      <button type="button" id="location-play">▶ Play</button>
+      <input type="range" id="location-scrub" min="1" max="1" value="1" aria-label="Show points up to">
+    </div>
     <div id="location-map" style="height: 300px;"></div>
     <p id="location-status">Loading...</p>
   </section>
@@ -87,21 +103,116 @@
           return;
         }
 
-        const latest = points[points.length - 1];
-        const map = L.map('location-map').setView([latest.lat, latest.long], 13);
+        // D1 CURRENT_TIMESTAMP looks like "YYYY-MM-DD HH:MM:SS" (UTC, no zone); treat it as UTC.
+        const parseTime = ts => {
+          const s = String(ts);
+          return new Date(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(s) ? s.replace(' ', 'T') + 'Z' : s);
+        };
+        for (const p of points) {
+          p.time = parseTime(p.timestamp);
+          p.when = p.time.toLocaleString();
+        }
+        points.sort((a, b) => a.time - b.time);
+
+        const map = L.map('location-map');
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OpenStreetMap contributors',
         }).addTo(map);
+        const layer = L.layerGroup().addTo(map);
 
-        L.polyline(points.map(p => [p.lat, p.long]), { color: '#3388ff' }).addTo(map);
+        const controls = document.getElementById('location-controls');
+        const scrub = document.getElementById('location-scrub');
+        const playBtn = document.getElementById('location-play');
+        controls.hidden = false;
 
-        for (const p of points) {
-          const when = new Date(p.timestamp).toLocaleString();
-          L.marker([p.lat, p.long]).addTo(map).bindPopup(when);
+        let inRange = [];       // points inside the chosen date range
+        let playTimer = null;
+
+        const ageColor = f => `hsl(${Math.round(210 - 190 * f)}, 85%, 50%)`; // blue (old) -> red (new)
+
+        function stopPlay() {
+          clearInterval(playTimer);
+          playTimer = null;
+          playBtn.textContent = '▶ Play';
         }
 
-        const when = new Date(latest.timestamp).toLocaleString();
-        status.textContent = `Latest: ${latest.lat}, ${latest.long} at ${when} (${points.length} points)`;
+        function draw() {
+          layer.clearLayers();
+          const shown = inRange.slice(0, Number(scrub.value));
+          if (shown.length === 0) {
+            status.textContent = 'No points in this range.';
+            return;
+          }
+          const last = shown.length - 1;
+          const frac = i => (last === 0 ? 1 : i / last);
+
+          for (let i = 1; i < shown.length; i++) {
+            const f = frac(i);
+            L.polyline([[shown[i - 1].lat, shown[i - 1].long], [shown[i].lat, shown[i].long]], {
+              color: ageColor(f), opacity: 0.25 + 0.75 * f, weight: 3,
+            }).addTo(layer);
+          }
+          shown.forEach((p, i) => {
+            let m;
+            if (i === last) {
+              m = L.marker([p.lat, p.long], {
+                icon: L.divIcon({ className: '', html: '<div class="loc-now"></div>', iconSize: [18, 18] }),
+                zIndexOffset: 1000,
+              });
+            } else {
+              const f = frac(i);
+              m = L.circleMarker([p.lat, p.long], {
+                radius: 4, color: ageColor(f), fillColor: ageColor(f),
+                fillOpacity: 0.25 + 0.75 * f, opacity: 0.25 + 0.75 * f, weight: 1,
+              });
+            }
+            m.addTo(layer).bindPopup(p.when);
+          });
+
+          const p = shown[last];
+          status.textContent = `${countLabel(shown.length, inRange.length)}. Latest shown: ${Number(p.lat).toFixed(4)}, ${Number(p.long).toFixed(4)} at ${p.when}`;
+        }
+
+        const countLabel = (n, total) => (n === total ? `${total} points` : `${n} of ${total} points`);
+
+        function applyRange(hours, fit) {
+          stopPlay();
+          const cutoff = hours === 'all' ? -Infinity : Date.now() - hours * 3600 * 1000;
+          inRange = points.filter(p => p.time.getTime() >= cutoff);
+          scrub.max = Math.max(inRange.length, 1);
+          scrub.value = scrub.max;
+          draw();
+          if (fit && inRange.length) {
+            map.fitBounds(L.latLngBounds(inRange.map(p => [p.lat, p.long])), { maxZoom: 15, padding: [20, 20] });
+          }
+        }
+
+        controls.querySelectorAll('button[data-range]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            controls.querySelectorAll('button[data-range]').forEach(b => b.classList.toggle('active', b === btn));
+            const r = btn.dataset.range;
+            applyRange(r === 'all' ? 'all' : Number(r), true);
+          });
+        });
+
+        scrub.addEventListener('input', () => { stopPlay(); draw(); });
+
+        playBtn.addEventListener('click', () => {
+          if (playTimer) { stopPlay(); return; }
+          if (inRange.length < 2) return;
+          if (Number(scrub.value) >= Number(scrub.max)) scrub.value = 1;
+          playBtn.textContent = '⏸ Pause';
+          const step = Math.max(1, Math.ceil(inRange.length / 100)); // roughly 10s end to end
+          playTimer = setInterval(() => {
+            scrub.value = Math.min(Number(scrub.max), Number(scrub.value) + step);
+            draw();
+            if (Number(scrub.value) >= Number(scrub.max)) stopPlay();
+          }, 100);
+        });
+
+        const latest = points[points.length - 1];
+        map.setView([latest.lat, latest.long], 13); // must be set before layers are added
+        applyRange('all', false);
       } catch (e) {
         status.textContent = "Couldn't load location.";
       }
