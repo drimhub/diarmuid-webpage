@@ -1,0 +1,28 @@
+# When the repo owner adds the "rejected" label, close the issue as "not planned".
+# Removing the label reopens it. The reason shown on /suggestions/ is the owner's
+# latest comment that doesn't mention @claude, so comment the reason first.
+name: Suggestion rejected
+
+on:
+  issues:
+    types: [labeled, unlabeled]
+
+permissions:
+  issues: write
+
+jobs:
+  close-or-reopen:
+    if: github.event.label.name == 'rejected' && github.event.sender.login == github.repository_owner
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NUMBER: ${{ github.event.issue.number }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Close as not planned
+        if: github.event.action == 'labeled' && github.event.issue.state == 'open'
+        run: gh issue close "$NUMBER" --repo "$REPO" --reason "not planned"
+
+      - name: Reopen
+        if: github.event.action == 'unlabeled' && github.event.issue.state == 'closed'
+        run: gh issue reopen "$NUMBER" --repo "$REPO"
