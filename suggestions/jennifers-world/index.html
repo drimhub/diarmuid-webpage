@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jennifer's world 🐰</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="back" href="/suggestions/">← back</a>
+  <h1>🐰 Jennifer's world 💋</h1>
+  <p class="sub">Bunnies and drim are raining down. Tap one to send it to Jennifer for a kiss!</p>
+
+  <div id="sky" aria-label="Bunnies and drim raining down around Jennifer">
+    <div id="jennifer"><span id="jennifer-face">👩</span></div>
+  </div>
+
+  <p class="score">Kisses: <strong id="kisses">0</strong> 💋</p>
+
+  <div class="uploads">
+    <label class="btn">Add your own drim pictures
+      <input type="file" id="drim-files" accept="image/*" multiple hidden>
+    </label>
+    <label class="btn">Upload a photo of Jennifer
+      <input type="file" id="jen-file" accept="image/*" hidden>
+    </label>
+    <button type="button" class="btn" id="reset">Reset pictures</button>
+  </div>
+  <p class="note">Pictures stay in your browser for this visit. Nothing is uploaded, saved or shared.</p>
+
+  <script src="script.js"></script>
+</body>
+</html>
