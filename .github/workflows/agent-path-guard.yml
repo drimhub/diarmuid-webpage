@@ -1,0 +1,62 @@
+# Fails agent PRs (branches named claude/...) that change anything outside
+# suggestions/<feature>/ and suggestions/features.json, or that use storage or
+# bookclub code. Make "path-guard" a required check on main.
+#
+# pull_request_target runs this file as it is on main, so a PR can't weaken it.
+# The PR's files are only read as data (git diff / git show), never executed.
+name: Agent path guard
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  path-guard:
+    if: startsWith(github.head_ref, 'claude/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch PR head (read only)
+        run: git fetch origin "pull/${{ github.event.pull_request.number }}/head:pr-head"
+
+      - name: Check changed paths
+        run: |
+          base=$(git merge-base HEAD pr-head)
+          fail=0
+          while IFS= read -r f; do
+            case "$f" in
+              suggestions/index.html)
+                echo "::error file=$f::The suggestion form is off limits to the agent"; fail=1 ;;
+              suggestions/features.json|suggestions/*/*)
+                ;;
+              *)
+                echo "::error file=$f::Outside suggestions/<feature>/"; fail=1 ;;
+            esac
+          done < <(git diff --name-only --no-renames "$base" pr-head)
+          exit $fail
+
+      - name: Check added code for storage and bookclub access
+        run: |
+          base=$(git merge-base HEAD pr-head)
+          pattern='firebase|firestore|localstorage|sessionstorage|indexeddb|document\.cookie|bookclub'
+          if git diff "$base" pr-head -- suggestions | grep '^+' | grep -inE "$pattern"; then
+            echo "::error::Added lines above mention storage or bookclub. Agent features must be plain front-end pages."
+            exit 1
+          fi
+
+      - name: Validate features.json
+        run: |
+          git show pr-head:suggestions/features.json | jq -e '
+            type == "array" and all(.[];
+              (.slug | type == "string" and test("^[a-z0-9-]+$")) and
+              (.title | type == "string") and
+              (.issue | type == "number"))'
