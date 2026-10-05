@@ -1,0 +1,50 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 16px; min-height: 100vh;
+  font-family: system-ui, sans-serif; text-align: center;
+  background: #fff0f6; color: #5a2a45;
+}
+.back { display: inline-block; margin-bottom: 8px; color: #b03a7a; }
+h1 { margin: 4px 0; font-size: 1.8rem; }
+.sub, .note { margin: 6px auto; max-width: 480px; }
+.note { font-size: .85rem; opacity: .75; }
+#sky {
+  position: relative; overflow: hidden; margin: 12px auto; max-width: 520px;
+  height: 60vh; min-height: 320px; border-radius: 16px;
+  background: linear-gradient(#ffd6e8, #ffeef7 70%, #c8f0c0 70%);
+  touch-action: manipulation; user-select: none;
+}
+#jennifer {
+  position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+  font-size: 3.5rem; line-height: 1;
+}
+#kiss {
+  position: absolute; left: 50%; top: -10px; transform: translateX(-50%);
+  font-size: 1.8rem; opacity: 0; pointer-events: none;
+}
+#kiss.show { animation: kiss .7s ease-out; }
+@keyframes kiss {
+  0% { opacity: 1; transform: translate(-50%, 0) scale(.6); }
+  100% { opacity: 0; transform: translate(-50%, -50px) scale(1.4); }
+}
+.item {
+  position: absolute; top: -70px; width: 56px; height: 56px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.4rem; cursor: pointer; border: 0; padding: 0; background: none;
+  animation: fall linear forwards;
+}
+.item img, .item svg { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.item.kissed { animation: none; transition: all .35s ease-in; opacity: 0; transform: scale(.2); }
+@keyframes fall {
+  to { transform: translateY(calc(var(--h) + 80px)) rotate(var(--r)); }
+}
+.score { font-size: 1.2rem; }
+.controls { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.photo, button#clear {
+  padding: 8px 14px; border-radius: 999px; border: 2px solid #e58ab8;
+  background: #fff; color: #b03a7a; cursor: pointer; font: inherit;
+}
+.photo input { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .item { animation-duration: 12s !important; }
+}
