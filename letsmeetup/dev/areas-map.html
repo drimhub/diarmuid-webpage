@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Areas map (dev)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <style>
+    :root { color-scheme: light dark; --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --line: #ccc; --panel: #fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #151515; --fg: #f0f0f0; --muted: #999; --line: #333; --panel: #1e1e1e; } }
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; grid-template-columns: 320px 1fr; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+    aside { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); }
+    aside header { padding: .75rem; border-bottom: 1px solid var(--line); }
+    h1 { font-size: 1rem; margin: 0 0 .5rem; }
+    input[type=search] { width: 100%; box-sizing: border-box; padding: .4rem .5rem; font: inherit; }
+    label { display: block; margin-top: .35rem; color: var(--muted); }
+    #stats { margin: .5rem 0 0; color: var(--muted); }
+    #snap { margin: .5rem 0 0; min-height: 2.4em; }
+    #list { flex: 1; overflow: auto; margin: 0; padding: 0; list-style: none; }
+    #list li { display: flex; justify-content: space-between; gap: .5rem; padding: .35rem .75rem; border-bottom: 1px solid var(--line); cursor: pointer; }
+    #list li:hover, #list li.sel { background: rgba(80, 140, 255, .18); }
+    #list .flag { color: #c0392b; font-size: .8rem; white-space: nowrap; }
+    #map { height: 100%; }
+    .lbl { background: transparent; border: 0; box-shadow: none; font-weight: 600; color: #1a1a1a; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; padding: 0; }
+    @media (max-width: 700px) { body { grid-template-columns: 1fr; grid-template-rows: 40% 60%; } aside { order: 2; } }
+  </style>
+</head>
+<body>
+  <aside>
+    <header>
+      <h1>London areas <span id="count"></span></h1>
+      <input id="filter" type="search" placeholder="Filter by name" autocomplete="off" aria-label="Filter areas">
+      <label><input id="labels" type="checkbox" checked> Show names on the map</label>
+      <label><input id="rings" type="checkbox"> Show 4 km snap radius around selected</label>
+      <div id="stats"></div>
+      <div id="snap">Click anywhere on the map to see which area it snaps to.</div>
+    </header>
+    <ul id="list"></ul>
+  </aside>
+  <div id="map"></div>
+
+  <script type="module">
+    import { snapToArea, haversineKm, MAX_SNAP_KM, LONDON_BOUNDS as B } from '/snap.js';
+
+    const $ = (id) => document.getElementById(id);
+    const areas = await (await fetch('/areas.json')).json();
+
+    // Nearest neighbour for each area, to flag anchors that are suspiciously close together or isolated.
+    for (const a of areas) {
+      let best = Infinity, who = null;
+      for (const o of areas) {
+        if (o === a) continue;
+        const d = haversineKm(a.lat, a.lng, o.lat, o.lng);
+        if (d < best) { best = d; who = o; }
+      }
+      a.nn = best; a.nnName = who.name;
+      a.flag = best < 0.6 ? `close to ${who.name} (${best.toFixed(2)} km)` : best > 4 ? `isolated (${best.toFixed(1)} km)` : '';
+    }
+
+    const map = L.map('map').setView([51.5074, -0.1278], 11);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+    L.rectangle([[B.south, B.west], [B.north, B.east]], { color: '#888', weight: 1, dashArray: '4', fill: false }).addTo(map);
+
+    const markers = new Map();
+    const ring = L.circle([0, 0], { radius: MAX_SNAP_KM * 1000, color: '#2a6fdb', weight: 1, fillOpacity: 0.05 });
+    const probe = L.layerGroup().addTo(map);
+    let selected = null;
+
+    for (const a of areas) {
+      const m = L.circleMarker([a.lat, a.lng], { radius: 6, weight: 2, color: a.flag ? '#c0392b' : '#2a6fdb', fillOpacity: 0.7 }).addTo(map);
+      m.bindTooltip(a.name, { permanent: true, direction: 'right', offset: [6, 0], className: 'lbl' });
+      m.bindPopup(() => {
+        const d = document.createElement('div');
+        const t = document.createElement('strong');
+        t.textContent = a.name; // textContent: names come from data
+        const p = document.createElement('div');
+        p.textContent = `${a.id} · ${a.lat}, ${a.lng} · nearest: ${a.nnName} ${a.nn.toFixed(2)} km`;
+        d.append(t, p);
+        return d;
+      });
+      m.on('click', () => select(a, false));
+      markers.set(a.id, m);
+    }
+
+    function select(a, fly = true) {
+      selected = a;
+      for (const li of $('list').children) li.classList.toggle('sel', li.dataset.id === a.id);
+      if (fly) map.flyTo([a.lat, a.lng], Math.max(map.getZoom(), 14));
+      markers.get(a.id).openPopup();
+      updateRing();
+    }
+
+    function updateRing() {
+      if ($('rings').checked && selected) ring.setLatLng([selected.lat, selected.lng]).addTo(map);
+      else ring.remove();
+    }
+
+    function renderList() {
+      const q = $('filter').value.trim().toLowerCase();
+      const shown = areas.filter((a) => a.name.toLowerCase().includes(q));
+      $('list').replaceChildren(...shown.map((a) => {
+        const li = document.createElement('li');
+        li.dataset.id = a.id;
+        const n = document.createElement('span'); n.textContent = a.name;
+        li.append(n);
+        if (a.flag) { const f = document.createElement('span'); f.className = 'flag'; f.textContent = a.flag; li.append(f); }
+        li.addEventListener('click', () => select(a));
+        if (selected && selected.id === a.id) li.classList.add('sel');
+        return li;
+      }));
+      $('count').textContent = `(${shown.length}/${areas.length})`;
+    }
+
+    function updateLabels() {
+      for (const m of markers.values()) {
+        if ($('labels').checked && map.getZoom() >= 12) m.openTooltip(); else m.closeTooltip();
+      }
+    }
+
+    const flagged = areas.filter((a) => a.flag);
+    $('stats').textContent = `${areas.length} areas. Red = flagged (${flagged.length}): anchors under 0.6 km apart or over 4 km from any other.`;
+
+    map.on('click', (e) => {
+      probe.clearLayers();
+      const hit = snapToArea(e.latlng.lat, e.latlng.lng, areas);
+      L.circleMarker(e.latlng, { radius: 4, color: '#e67e22' }).addTo(probe);
+      if (!hit) { $('snap').textContent = 'No snap: outside Greater London or more than 4 km from any area.'; return; }
+      L.polyline([e.latlng, [hit.area.lat, hit.area.lng]], { color: '#e67e22', weight: 2, dashArray: '4' }).addTo(probe);
+      $('snap').textContent = `Snaps to ${hit.area.name} (${hit.distanceKm.toFixed(2)} km away)`;
+    });
+
+    $('filter').addEventListener('input', renderList);
+    $('labels').addEventListener('change', updateLabels);
+    $('rings').addEventListener('change', updateRing);
+    map.on('zoomend', updateLabels);
+    renderList();
+    updateLabels();
+  </script>
+</body>
+</html>

@@ -22,6 +22,7 @@ _headers                     Cloudflare Pages header rules (disables caching)
 firestore.rules              Firestore security rules (deployed with the Firebase CLI)
 firebase.json, .firebaserc   Firebase CLI config (project: diarmuid-webpage)
 location-worker/             Cloudflare Worker + D1 backing the "Locations" map on the homepage
+letsmeetup/                  Separate Worker (static assets + API + D1) served at letsmeetup.diarmu.id; see letsmeetup/README.md
 tools/                       Local scratch/tooling (not part of the deployed site)
 ```
 

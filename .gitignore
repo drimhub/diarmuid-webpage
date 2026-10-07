@@ -3,3 +3,4 @@
 node_modules/
 firebase-debug.log
 firestore-debug.log
+letsmeetup/fixtures/

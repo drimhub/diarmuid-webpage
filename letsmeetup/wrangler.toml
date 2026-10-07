@@ -1,0 +1,24 @@
+name = "letsmeetup"
+main = "src/index.js"
+compatibility_date = "2026-09-15"
+
+# Serves letsmeetup.diarmu.id. Cloudflare creates the DNS record and certificate on deploy.
+routes = [{ pattern = "letsmeetup.diarmu.id", custom_domain = true }]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# API requests go to the Worker first; everything else is served as a static file.
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "letsmeetup"
+# Replace after `wrangler d1 create letsmeetup` (see README.md).
+database_id = "REPLACE_WITH_DATABASE_ID"
+
+[vars]
+# Public value (also served by /api/config). Replace with your OAuth web client ID.
+GOOGLE_CLIENT_ID = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
+PLACES_PROVIDER = "google"
+ROUTING_PROVIDER = "google"

@@ -1,0 +1,19 @@
+{
+  "name": "letsmeetup",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply letsmeetup --local",
+    "db:remote": "wrangler d1 migrations apply letsmeetup --remote",
+    "spike": "node spike/google-spike.mjs",
+    "spike:dry": "node spike/google-spike.mjs --dry",
+    "test": "node --test",
+    "build:areas": "node scripts/build-areas.mjs",
+    "areas:map": "node scripts/serve-areas-map.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.148.0"
+  }
+}
