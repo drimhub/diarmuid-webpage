@@ -25,8 +25,9 @@ function parseJson(bytes) {
 }
 
 async function getGoogleKeys(force = false) {
-  const fresh = Date.now() - jwksCache.fetchedAt < 60 * 60 * 1000;
-  if (jwksCache.keys && fresh && !force) return jwksCache.keys;
+  const age = Date.now() - jwksCache.fetchedAt;
+  if (jwksCache.keys && age < 60 * 60 * 1000 && !force) return jwksCache.keys;
+  if (jwksCache.keys && force && age < 60 * 1000) return jwksCache.keys; // cool-down: forged key ids can't force a refetch every time
   const res = await fetch(GOOGLE_JWKS_URL);
   if (!res.ok) throw new Error('Could not fetch Google signing keys');
   const { keys } = await res.json();
@@ -101,15 +102,17 @@ function readCookie(request, name) {
 
 export async function upsertUser(db, claims) {
   const now = new Date().toISOString();
+  // Never fall back to the email address as a name: first names are shown to other people.
+  const name = String(claims.name || claims.given_name || '').trim().slice(0, 100) || 'Friend';
   await db
     .prepare(
       `INSERT INTO users (id, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET email = excluded.email, name = excluded.name,
          avatar_url = excluded.avatar_url`,
     )
-    .bind(claims.sub, claims.email, claims.name || claims.email, claims.picture || null, now)
+    .bind(claims.sub, claims.email, name, claims.picture || null, now)
     .run();
-  return { id: claims.sub, email: claims.email, name: claims.name || claims.email };
+  return { id: claims.sub, email: claims.email, name };
 }
 
 // Creates a session and returns the Set-Cookie header value.

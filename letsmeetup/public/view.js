@@ -57,7 +57,7 @@ export function suggestionCard(s, { miss } = {}) {
     s.address && h('div', { class: 'muted small' }, s.address),
     journeyList(s.travel),
     h('div', { class: 'small' }, `Average ${s.travel.meanMinutes} min · longest ${s.travel.maxMinutes} min (${s.travel.furthest.name}${s.travel.furthest.aboveMeanMinutes > 0 ? `, ${s.travel.furthest.aboveMeanMinutes} min above average` : ''})`),
-    miss && h('div', { class: 'error' }, 'Too far for: ' + miss.exceeds.map((x) => `${x.name} (${x.minutes} min, limit ${x.limit})`).join(', ')));
+    miss && h('div', { class: 'error' }, 'Too far for: ' + miss.exceeds.map((x) => x.name).join(', ')));
 }
 
 export function renderResults(r, { isOwner }) {

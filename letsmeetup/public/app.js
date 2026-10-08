@@ -150,7 +150,18 @@ async function homeView() {
   return {
     el: h('div', {},
       h('section', { class: 'card' }, h('h2', {}, 'Plan something'), form),
-      h('section', { class: 'card' }, h('h2', {}, 'Your events'), list)),
+      h('section', { class: 'card' }, h('h2', {}, 'Your events'), list),
+      h('section', { class: 'card' }, h('h2', {}, 'Your data'),
+        h('p', { class: 'muted small' }, 'We keep your Google name, the events you are in and the neighbourhoods you picked. Never your address or exact location. ',
+          h('a', { href: '/privacy.html' }, 'Privacy details')),
+        h('button', { class: 'danger', type: 'button', onclick: async () => {
+          if (!confirm('Delete your account and everything you organised? Your place in other people\'s events goes too. This cannot be undone.')) return;
+          try {
+            await api('/api/me', { method: 'DELETE' });
+            state.user = null;
+            navigate('/');
+          } catch (e) { alert(e.message); }
+        } }, 'Delete my data'))),
     mount: () => whenReady(() => window.turnstile, () => {
       widgetId = window.turnstile.render(turnstileBox, { sitekey: state.config.turnstileSiteKey });
     }),
@@ -268,6 +279,8 @@ async function eventView(code) {
     const run = data.run;
     if (run.status === 'running') {
       resultsBox.replaceChildren(h('p', {}, 'Working out the fairest places… this takes a few seconds.'));
+    } else if (run.status === 'expired') {
+      resultsBox.replaceChildren(h('p', {}, data.me.isOwner ? 'These suggestions have expired. Press "Find again" to work them out afresh.' : 'These suggestions have expired. The organiser can work them out again.'));
     } else if (run.status === 'failed') {
       resultsBox.replaceChildren(h('p', { class: 'error' }, run.error));
     } else {

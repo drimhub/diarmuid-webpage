@@ -10,7 +10,10 @@ import {
   upsertUser,
   verifyGoogleIdToken,
 } from './auth.js';
+import { deleteAccount } from './account.js';
 import { handleEvents } from './events.js';
+import { limited } from './ratelimit.js';
+import { runRetention } from './retention.js';
 import { error, json, readJson } from './util.js';
 
 // Cookie-authenticated writes must come from our own pages: custom header (can't be set
@@ -44,6 +47,8 @@ export default {
       }
 
       if (pathname === '/api/auth/google' && method === 'POST') {
+        const tooMany = await limited(env, 'auth', request.headers.get('CF-Connecting-IP') || 'unknown');
+        if (tooMany) return tooMany;
         const body = await readJson(request);
         if (!body) return error('Invalid JSON', 400);
         let claims;
@@ -62,16 +67,32 @@ export default {
         return json({ ok: true }, 200, { 'Set-Cookie': cookie });
       }
 
+      if (pathname === '/api/me' && method === 'DELETE') {
+        const user = await getSessionUser(request, env.DB, url);
+        if (!user) return error('Please sign in', 401);
+        const tooMany = await limited(env, 'deleteAccount', user.id);
+        if (tooMany) return tooMany;
+        await deleteAccount(env.DB, user.id);
+        console.log(JSON.stringify({ event: 'account_deleted' }));
+        return json({ ok: true }, 200, { 'Set-Cookie': await destroySession(request, env.DB, url) });
+      }
+
       if (pathname === '/api/events' || pathname.startsWith('/api/events/')) {
         const user = await getSessionUser(request, env.DB, url);
         if (!user) return error('Please sign in', 401);
-        return handleEvents(request, env, url, user, ctx);
+        return await handleEvents(request, env, url, user, ctx); // await: so errors reach the catch below
       }
 
       return error('Not found', 404);
     } catch (e) {
-      console.error('letsmeetup error', e);
+      // One structured line per failure (no cookies, bodies or tokens), readable with `wrangler tail`.
+      console.error(JSON.stringify({ event: 'unhandled_error', method, path: pathname, error: e && e.name, message: e && String(e.message).slice(0, 300) }));
       return error('Server error', 500);
     }
+  },
+
+  // Daily clean-up (Cron Trigger in wrangler.toml).
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runRetention(env));
   },
 };

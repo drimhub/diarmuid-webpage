@@ -32,3 +32,13 @@ Groups of friends in London sign in with Google, say roughly where they are trav
 - No new Firestore collections, no localStorage for anything that matters (a remembered UI preference is fine).
 - Update `README.md` (this folder's and the root one, which has a short pointer) in the same change as anything that affects setup, structure, schema or config. Schema changes are new numbered files in `migrations/`, never edits to applied ones.
 - Don't touch `tools/` or `node_modules/`.
+
+## Security rules (learned the hard way; tests enforce several of these)
+
+- Inside a `try`, always `await` a promise before returning it, or the `catch` (and its structured log line) never runs.
+- Anything that can cost money or create data is rate limited (`src/ratelimit.js`) and capped. Order the steps of such an operation so that every failure can be undone, including refunding the day's budget; a state like `calculating` must never exist without the run that justifies it.
+- What the privacy page (`public/privacy.html`) says must stay true of the code; `test/hardening.test.mjs` checks the retention numbers and key claims. Change both together.
+- Never return another person's longest-journey limit, email, or any coordinate. Names are first names only, never derived from an email.
+- Rendering: text via `textContent`/text nodes only, links only plain Google Maps URLs (`public/view.js`, tested with hostile input). No inline scripts or handlers (the CSP relies on it).
+- When a person leaves, is removed or deletes their account, stored results that mention them are erased (`clearStoredResults`, `account.js`).
+- Stored Google place details are erased 30 days after the run (`retention.js`).

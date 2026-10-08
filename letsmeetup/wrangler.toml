@@ -2,6 +2,9 @@ name = "letsmeetup"
 main = "src/index.js"
 compatibility_date = "2026-09-15"
 
+# Serve only letsmeetup.diarmu.id, not a *.workers.dev address that zone rules (WAF, rate limits) would not cover.
+workers_dev = false
+
 # Serves letsmeetup.diarmu.id. Cloudflare creates the DNS record and certificate on deploy.
 routes = [{ pattern = "letsmeetup.diarmu.id", custom_domain = true }]
 
@@ -21,8 +24,16 @@ database_id = "4f62e6e1-f3ee-4984-90db-54764fc67954"
 [vars]
 # Public value (also served by /api/config). Replace with your OAuth web client ID.
 GOOGLE_CLIENT_ID = "610998004598-n1b3ieli40nkuc9dljp6n50g8tlu783o.apps.googleusercontent.com"
-# Turnstile site key (public). This is Cloudflare's always-pass test key; replace it with the real
-# widget's key for letsmeetup.diarmu.id, and set the secret: `npx wrangler secret put TURNSTILE_SECRET`.
+# Turnstile site key (public) of the widget for letsmeetup.diarmu.id. Its secret key is a Worker secret:
+# `npx wrangler secret put TURNSTILE_SECRET`. (Cloudflare's always-pass test key is 1x00000000000000000000AA.)
 TURNSTILE_SITE_KEY = "0x4AAAAAAFRKRe0Vc3O0slJc"
 PLACES_PROVIDER = "google"
 ROUTING_PROVIDER = "google"
+
+# Daily clean-up (src/retention.js): old events, expired sessions and results, stale counters.
+[triggers]
+crons = ["17 3 * * *"]
+
+# Keep Worker logs (errors, calculation costs) in the Cloudflare dashboard, and visible with `wrangler tail`.
+[observability]
+enabled = true

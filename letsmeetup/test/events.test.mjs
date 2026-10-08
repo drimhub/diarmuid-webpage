@@ -15,6 +15,7 @@ beforeEach(() => {
     ASSETS: { fetch: async () => new Response('asset') },
     GOOGLE_CLIENT_ID: 'test-client',
     TURNSTILE_DISABLED: '1',
+    RATE_LIMITS_OFF: '1',
   };
 });
 

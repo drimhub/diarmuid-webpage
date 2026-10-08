@@ -45,7 +45,9 @@ export function shapeRun(run, { currentParticipants, event }) {
     finishedAt: run.finished_at,
     error: run.status === 'failed' ? 'We could not work out suggestions this time. Please try again.' : null,
   };
-  if (run.status !== 'done' || !run.result_json) return { run: summary, results: null };
+  // Stored suggestions are erased after 30 days (see retention.js); the run itself remains.
+  if (run.status === 'done' && !run.result_json) return { run: { ...summary, status: 'expired' }, results: null };
+  if (run.status !== 'done') return { run: summary, results: null };
 
   const snapshot = JSON.parse(run.input_snapshot);
   const result = JSON.parse(run.result_json);
@@ -84,7 +86,7 @@ export function shapeRun(run, { currentParticipants, event }) {
       suggestions: result.suggestions.map(shapeSuggestion),
       closestMisses: (result.closestMisses || []).map((m) => ({
         ...shapeSuggestion(m),
-        exceeds: m.exceeds.map((x) => ({ name: nameOf[x.participantId] || 'Someone', minutes: x.minutes, limit: x.limit })),
+        exceeds: m.exceeds.map((x) => ({ name: nameOf[x.participantId] || 'Someone' })), // never the limit itself: it is private to that person
       })),
       planned: snapshot.participants.length,
       skipped: result.excluded && result.excluded.participantsWithoutLocation ? result.excluded.participantsWithoutLocation.length : 0,

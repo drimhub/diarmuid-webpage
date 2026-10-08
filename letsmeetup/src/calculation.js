@@ -26,7 +26,12 @@ export async function reapStaleRuns(db, eventId, nowMs = Date.now()) {
     .bind(eventId, cutoff)
     .all();
   for (const run of results) await finishRun(db, run.id, eventId, run.prior_status, 'failed', { error: 'Timed out' });
-  return results.length;
+  // An event can only be "calculating" while a run is running (startRun writes the run first).
+  const orphan = await db
+    .prepare("UPDATE events SET status = 'open' WHERE id = ? AND status = 'calculating' AND NOT EXISTS (SELECT 1 FROM calc_runs WHERE event_id = ? AND status = 'running')")
+    .bind(eventId, eventId)
+    .run();
+  return results.length + orphan.meta.changes;
 }
 
 async function finishRun(db, runId, eventId, priorStatus, status, { result, error, cost } = {}) {
@@ -56,7 +61,16 @@ export async function consumeDailyBudget(db, limit, nowMs = Date.now()) {
   return !!row;
 }
 
+export async function refundDailyBudget(db, nowMs = Date.now()) {
+  const day = new Date(nowMs).toISOString().slice(0, 10);
+  await db.prepare("UPDATE usage_counters SET count = count - 1 WHERE day = ? AND key = 'calculations' AND count > 0").bind(day).run();
+}
+
 // Validates and starts a run. Returns { ok: true, runId } or { ok: false, status, error }.
+//
+// Order matters. The run record is written BEFORE the event is claimed, so an event that is
+// "calculating" always has a running run (anything else is an orphan the reaper can safely free).
+// Whatever fails afterwards, each step is undone, including the day's budget unit.
 export async function startRun(env, event, participants) {
   const db = env.DB;
   if (!env.TEST_PROVIDERS && !env.GOOGLE_MAPS_API_KEY) return { ok: false, status: 503, error: 'Suggestions are not available yet.' };
@@ -74,29 +88,41 @@ export async function startRun(env, event, participants) {
   const { n } = await db.prepare('SELECT COUNT(*) AS n FROM calc_runs WHERE event_id = ?').bind(event.id).first();
   if (n >= RUN_LIMITS.runsPerEvent) return { ok: false, status: 429, error: 'This event has used all of its calculations.' };
 
-  const limit = Number(env.CALC_DAILY_LIMIT) || RUN_LIMITS.dailyCalculations;
-  if (!(await consumeDailyBudget(db, limit))) return { ok: false, status: 429, error: 'Suggestions are paused for today. Please try again tomorrow.' };
-
-  // Claim the event; if two requests race, only one gets past this.
-  const claimed = await db.prepare("UPDATE events SET status = 'calculating' WHERE id = ? AND status IN ('open', 'closed')").bind(event.id).run();
-  if (!claimed.meta.changes) return { ok: false, status: 409, error: 'A calculation is already running.' };
-
   const tags = (await db.prepare('SELECT tag FROM event_tags WHERE event_id = ? ORDER BY tag').bind(event.id).all()).results.map((t) => t.tag);
   const snapshot = {
     event: { eventType: event.event_type, startAt: event.start_at, tags },
     participants: located.map((p) => ({ id: p.id, name: p.display_name, areaId: p.area_id, mode: p.mode, maxMinutes: p.max_minutes })),
   };
+
+  const limit = Number(env.CALC_DAILY_LIMIT) || RUN_LIMITS.dailyCalculations;
+  if (!(await consumeDailyBudget(db, limit))) return { ok: false, status: 429, error: 'Suggestions are paused for today. Please try again tomorrow.' };
+
   const runId = newId();
+  let inserted = false;
+  let claimed = false;
+  const undo = async () => {
+    if (claimed) await db.prepare("UPDATE events SET status = ? WHERE id = ? AND status = 'calculating'").bind(fresh.status, event.id).run();
+    if (inserted) await db.prepare("DELETE FROM calc_runs WHERE id = ? AND status = 'running'").bind(runId).run();
+    await refundDailyBudget(db);
+  };
   try {
     await db
       .prepare("INSERT INTO calc_runs (id, event_id, status, started_at, prior_status, input_snapshot) VALUES (?, ?, 'running', ?, ?, ?)")
       .bind(runId, event.id, now(), fresh.status, JSON.stringify(snapshot))
       .run();
+    inserted = true;
+    // Claim the event; if two requests race, only one gets past this.
+    const claim = await db.prepare("UPDATE events SET status = 'calculating' WHERE id = ? AND status IN ('open', 'closed')").bind(event.id).run();
+    if (!claim.meta.changes) {
+      await undo();
+      return { ok: false, status: 409, error: 'A calculation is already running.' };
+    }
+    claimed = true;
+    return { ok: true, runId };
   } catch (e) {
-    await db.prepare("UPDATE events SET status = ? WHERE id = ? AND status = 'calculating'").bind(fresh.status, event.id).run();
+    await undo().catch(() => {});
     throw e;
   }
-  return { ok: true, runId };
 }
 
 // The background work. Never throws: any failure is recorded on the run.

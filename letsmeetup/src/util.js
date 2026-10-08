@@ -3,18 +3,32 @@
 export function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers },
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers },
   });
 }
 
-export const error = (message, status) => json({ error: message }, status);
+export const error = (message, status, headers = {}) => json({ error: message }, status, headers);
 
-// Reads a small JSON body. Returns null when it is missing, too large or not an object.
+// Reads a small JSON body. Returns null when it is missing, too large or not an object. The body is
+// read in pieces and abandoned as soon as it passes the limit, whether or not Content-Length was honest.
 export async function readJson(request, maxBytes = 10_000) {
-  const text = await request.text();
-  if (text.length > maxBytes) return null;
+  if (Number(request.headers.get('Content-Length')) > maxBytes) return null;
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) { await reader.cancel(); return null; }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) { bytes.set(c, offset); offset += c.byteLength; }
   try {
-    const body = JSON.parse(text);
+    const body = JSON.parse(new TextDecoder().decode(bytes));
     return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
   } catch {
     return null;

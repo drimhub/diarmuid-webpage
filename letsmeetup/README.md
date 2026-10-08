@@ -2,13 +2,15 @@
 
 **letsmeetup.diarmu.id** — helps a group of friends in London find a place to meet that is a fair compromise for everyone's journey. Design rules and decisions are in [CLAUDE.md](CLAUDE.md).
 
-Status: **steps 1-6 of the build.** What exists: the Worker with static assets, the D1 schema, Google sign-in and cookie sessions, the neighbourhood list and on-device snapping, the Google spike script, the events flow (create, share link, join, say where you're travelling from, organiser controls), the provider layer (Google Places and Routes behind swappable interfaces, plus a record/replay harness), and the calculation itself (`src/calc/`: picks 3-5 fair venues with a journey summary). The calculation is not yet wired to the API or UI (the "Find a spot" button is a placeholder). The calculation and the results UI are not built yet (the "Find a spot" button is a placeholder). The remaining steps are in [ROADMAP.md](ROADMAP.md).
+Status: **steps 1-8 of the build (launch-ready once the checklist below is done).** What exists: the Worker with static assets, the D1 schema, Google sign-in and cookie sessions, the neighbourhood list and on-device snapping, the Google spike script, the events flow (create, share link, join, say where you're travelling from, organiser controls), the provider layer (Google Places and Routes behind swappable interfaces, plus a record/replay harness), and the calculation itself (`src/calc/`: picks 3-5 fair venues with a journey summary). The calculation is wired up: the organiser presses "Find a spot", it runs in the background, and the whole event sees the suggestions with everyone's journey times. Hardening is done (rate limits, retention, delete-my-data, privacy page, security headers, an independent security review). Still to come: the network-aware candidate fix described in ROADMAP.md. The calculation and the results UI are not built yet (the "Find a spot" button is a placeholder). The remaining steps are in [ROADMAP.md](ROADMAP.md).
 
 ## Structure
 
 ```
 wrangler.toml            Worker config: custom domain, static assets (SPA fallback), D1 binding, vars
 migrations/0001_init.sql D1 schema (users, sessions, events, participants, calc_runs, suggestions, travel_times)
+migrations/0002_calculation_runs.sql  Run state (prior status, result JSON) and the daily usage counter
+migrations/0003_rate_limits.sql       Rate-limit counters
 src/index.js             Worker entry: /api/* routing, CSRF check; everything else is served from public/
 src/auth.js              Google ID-token verification, hashed cookie sessions
 src/events.js            /api/events/* handlers (create, list, view, join, set my area, leave, lock, remove, delete)
@@ -22,9 +24,16 @@ src/providers/routing/google.js  Google Routes computeRouteMatrix -> normalised 
 src/providers/google-http.js     Shared Google HTTP: key header, field mask, retries, key-safe errors
 src/providers/http.js    Record/replay at the HTTP level (recordingFetch / replayFetch / MemoryStore)
 src/hours.js             Opening-hours logic over the normalised hours (open at a time, minutes until close)
+src/calculation.js      Starting and running a calculation: guards, the run record, background work, stale-run cleanup, daily budget
+src/results.js          Turns a stored run into the API response (first names only, safe links, "open until", out-of-date check)
+src/ratelimit.js        Fixed-window rate limits in D1 (sign-in per IP; creating, joining, calculating, deleting per user)
+src/retention.js        The daily clean-up (Cron Trigger): old events, stored results, sessions, counters, abandoned accounts
+src/account.js          "Delete my data"
 src/areas.js             Server-side area lookup by id (bundles public/areas.json); coordinates always come from here
 public/index.html        App shell
 public/app.js            Front end: sign-in, home (create + my events), event page (share, my journey, who's in, organiser controls)
+public/view.js          DOM helper and the results view, tested in a simulated DOM (all outside text goes in as text, links are only plain Google Maps URLs)
+public/privacy.html      The privacy page (a test keeps its retention numbers in step with the code)
 public/style.css         Styles (light/dark, mobile first)
 public/snap.js           On-device snapping: nearest area, type-ahead, postcode lookup, geolocation (pure functions, unit-tested)
 public/time.js          London-time helpers (typed London wall-clock time <-> UTC, formatting), unit-tested
@@ -50,9 +59,10 @@ ROADMAP.md               What's done and the remaining steps in detail
 
 - **Create:** a signed-in user makes an event (title, type lunch/dinner/drinks, start time in London time, tags) behind a Turnstile check and gets a share link `https://letsmeetup.diarmu.id/e/<code>`. The code is 10 random base32 characters. They become the first participant.
 - **Join:** anyone with the link signs in with Google and presses Join. Until they join they only see the title, type, time, organiser's first name and a head-count.
-- **Say where you are:** participants pick a neighbourhood (typed name, postcode, or "use my location"), a travel mode (transit/bike/walk) and optionally a longest acceptable journey. Others see each person's first name, neighbourhood and mode; nobody else's longest-journey limit.
+- **Say where you are:** participants pick a neighbourhood (typed name, postcode, or "use my location"), a travel mode (transit/bike/walk) and optionally a longest acceptable journey. Others see each person's first name, neighbourhood and mode; nobody else's longest-journey limit (when no place fits everyone's limits the page names who it was too far for, never the limit itself).
 - **Organiser:** can lock/unlock the event, remove people, and delete the event (which deletes everything attached). Other people can leave.
-- **Limits:** 12 people per event, 10 events created per user per day, start time at most 90 days ahead.
+- **Find a spot:** the organiser (once at least two people have said where they are) presses the button. `POST /calculate` claims the event (status `calculating`, so locations and membership can't change mid-run), records a run with a snapshot of everyone's neighbourhood, mode and limit, answers immediately, and carries on in the background (`ctx.waitUntil`). The page polls every 2 seconds, then shows the suggestions to everyone in the event. The event goes back to open (or locked, if it was) however the run ends. A run that never finishes is marked failed after 5 minutes. If anyone changes their plans afterwards the results are flagged as out of date, and the organiser can run it again.
+- **Limits:** 12 people per event, 10 events created per user per day, start time at most 90 days ahead; at most 5 calculations per event (failed ones count, they spend API calls), and 30 calculations a day across the whole service (`CALC_DAILY_LIMIT` variable to change it), after which "Find a spot" says suggestions are paused until tomorrow. Event past its start time: no calculation. Per-person rate limits also apply (see Security, privacy and operations).
 - The front end refreshes the "who's in" list every 15 seconds while the tab is visible.
 
 ## API
@@ -67,10 +77,12 @@ All routes are JSON. `GET` routes need nothing special; every other request must
 | `POST /api/auth/logout` | Deletes the session |
 | `GET /api/events` | Events I'm in |
 | `POST /api/events` | `{ title, eventType, startAt (ISO UTC), tags[], turnstileToken }` → `201 { code }` |
-| `GET /api/events/:code` | `{ event, me, participants }`; for non-participants `me` is null and there is no `participants` |
+| `GET /api/events/:code` | `{ event, me, participants, run, results, calculation }`; `run` is the latest run (`running`/`done`/`failed`), `results` the shaped suggestions (first names, journey times, labels, notes, `stale`), `calculation` the counts for the button. Non-participants get `me: null` and none of the rest |
 | `POST /api/events/:code/join` | Join (idempotent; 409 if full or locked) |
 | `PUT /api/events/:code/me` | `{ areaId, mode, maxMinutes? }`. Extra fields (including coordinates) are ignored |
 | `DELETE /api/events/:code/me` | Leave (not for the organiser) |
+| `DELETE /api/me` | "Delete my data": removes the account, events they organised, their place in other events (results that included them are erased) and their sessions |
+| `POST /api/events/:code/calculate` | Organiser: start a calculation. `202 { runId }`; the work continues in the background. 400 (fewer than two located people, event already started), 409 (already running), 429 (event or daily cap), 503 (no Google key configured) |
 | `POST /api/events/:code/lock` | Organiser: `{ locked: boolean }` |
 | `DELETE /api/events/:code/participants/:id` | Organiser: remove someone |
 | `DELETE /api/events/:code` | Organiser: delete the event |
@@ -104,6 +116,34 @@ Business logic never touches Google directly. It calls two interfaces defined in
 
 Results: `status` is `ok`, `not_enough_people`, or `no_results` with a `reason` (`no_venues_found`, `no_venues_matched`, `no_venue_within_limits` with the three `closestMisses` and who they exceed, or `journeys_unavailable`). Also returned: user-facing `notes`, the `candidates` looked at, what was excluded and why, and the `cost` in provider requests. Every tunable number is in `src/calc/config.js` (overridable per call), and `HEURISTICS_VERSION` is stored with each run.
 
+## Security, privacy and operations
+
+**Security headers** (`public/_headers`): nosniff, frame denial, HSTS, a restrictive Permissions-Policy (geolocation only for the site itself), a COOP that still allows Google's sign-in popup, and a Content-Security-Policy that allows only this site, Google sign-in, Cloudflare Turnstile and postcodes.io. The CSP currently ships as **Report-Only**, because it can't be proven correct without a real browser: after deploying, open the browser console and go through sign-in, create, join, set a location and "Find a spot". If there are no "Content-Security-Policy" messages, rename `Content-Security-Policy-Report-Only` to `Content-Security-Policy` in `_headers` and redeploy. If the sign-in button or the Turnstile widget misbehaves after that, switch it back. Tests check that every external host the pages use is allowed, that no page has an inline script or handler, and that no app code builds markup from strings.
+
+**Rate limits** (`src/ratelimit.js`, fixed windows in D1, 429 with `Retry-After`): sign-in attempts 20 per 10 min per address; creating events 6 per 10 min, joining 30 per 10 min, calculations 5 per 10 min and 12 per day, any other change 90 per 10 min, all per user; deleting an account 3 per hour. Reads are not limited here (the results poll must work), so also add a Cloudflare rate-limiting rule (below). `workers_dev` is off, so the app is only reachable on `letsmeetup.diarmu.id`, where zone rules apply.
+
+**Retention** (`src/retention.js`, runs daily at 03:17 UTC via a Cron Trigger): events are deleted 30 days after they start (participants, tags and runs go with them); stored suggestions, which contain Google place details, are erased 30 days after they were worked out even if the event is later (the run stays, shown as "expired"); expired sessions, rate-limit windows and usage counters are cleared; accounts with no events, no participation and no session are removed after 90 days. The privacy page states these numbers and a test fails if they drift apart.
+
+**Leaving and deleting.** Someone who leaves, or is removed, takes their first name and journey times out of earlier results (erased; the run still counts towards the event's cap). "Delete my data" does the same for events they only joined, and deletes the events they organised.
+
+**Logs.** Worker logs are on (`[observability]`): one JSON line per unhandled error (method, path, error name and message; never cookies, bodies, emails, tokens or coordinates), per account deletion, per retention run. Read live with `npx wrangler tail`. Calculation failures are logged with the error name and message; the user only sees "try again". To see today's calculation count: `npx wrangler d1 execute letsmeetup --remote --command "SELECT * FROM usage_counters ORDER BY day DESC LIMIT 7"`.
+
+**Known, accepted behaviours.** A removed participant can rejoin while the event is open (lock the event to prevent it). Google ID tokens are accepted for their lifetime (about an hour), as is standard. Someone who knows an event link sees its basics (title, time, organiser's first name, head-count) once signed in. A determined set of accounts could use up the day's calculation budget (`CALC_DAILY_LIMIT`, default 30) and pause suggestions until tomorrow, which costs availability but never money beyond that cap. The stored Google account email and picture link are not used for anything yet.
+
+## Launch checklist
+
+Do these in order; each is quick.
+
+1. **Database:** `npm run db:remote` (applies migrations 0002 and 0003 if not already applied).
+2. **Secrets:** `npx wrangler secret put GOOGLE_MAPS_API_KEY` and `npx wrangler secret put TURNSTILE_SECRET`. `TURNSTILE_SITE_KEY` and `GOOGLE_CLIENT_ID` in `wrangler.toml` must be the real ones.
+3. **Google Cloud:** the Maps key is restricted to Places API (New) and Routes API; daily quotas are low (about 200 requests a day per API to start); a budget alert (about $25) exists; the OAuth consent screen is **published** (In production), not Testing, or only test users can sign in; authorised JavaScript origins are `https://letsmeetup.diarmu.id` (and `http://localhost:8787` for development).
+4. **Deploy:** `npm run deploy`. Check the cron shows under the Worker's Triggers in the dashboard.
+5. **Cloudflare dashboard rules** for the zone (Security, WAF, Rate limiting rules): `letsmeetup.diarmu.id` and `/api/auth/google` at 10 requests per minute per IP; and the same host and `/api/` at about 300 requests per minute per IP to cap polling and scraping.
+6. **Real-browser pass** on a phone and a desktop with two real Google accounts: sign in, create, share the link, join, set locations, "Find a spot", lock, leave, delete my data. With the console open, confirm there are no CSP messages, then enforce the CSP (see Security headers) and repeat sign-in and the Turnstile widget once.
+7. **Read** `/privacy.html` and correct anything that is not true of how you run it (it is written for this setup; the contact line points to diarmu.id).
+8. **Billing check** a day after the first real calculations: Cloud Console, Billing, Reports, grouped by SKU, to confirm which SKUs the Places and Routes calls hit (this also decides the planned network-aware candidate fix, see ROADMAP.md).
+9. `npx wrangler tail` during the first real use, to see any error lines as they happen.
+
 ## Neighbourhoods and snapping
 
 - Where someone travels from is only ever one of the areas in `public/areas.json`. The browser picks it from a typed area name, a postcode, or the device's location, and sends **only the area id** to the server. Exact coordinates and postcodes are never sent to or stored by our server.
@@ -119,7 +159,8 @@ Results: `status` is `ok`, `not_enough_people`, or `no_results` with a `reason` 
 2. **Google OAuth client**: Google Cloud Console → APIs & Services → Credentials → Create OAuth client ID → Web application. Add authorised JavaScript origins `https://letsmeetup.diarmu.id` and `http://localhost:8787`. Put the client ID in `GOOGLE_CLIENT_ID` in `wrangler.toml` (it is public). The consent screen only needs the default `openid email profile` scopes.
 3. **Turnstile**: Cloudflare dashboard → Turnstile → add a widget for `letsmeetup.diarmu.id`. Put the **site key** in `TURNSTILE_SITE_KEY` in `wrangler.toml` (it ships as Cloudflare's always-pass test key, which must be replaced before launch) and run `npx wrangler secret put TURNSTILE_SECRET` with the **secret key**. Without the secret, event creation is refused (it fails closed).
 4. **Deploy**: `npm run deploy`. Cloudflare creates the `letsmeetup.diarmu.id` DNS record and certificate (the `diarmu.id` zone must be in the same Cloudflare account).
-5. **Google Maps key** (for `npm run spike` and later the calculation): create a key restricted to Places API (New) and Routes API, put `GOOGLE_MAPS_API_KEY=...` in `letsmeetup/.dev.vars` for local use and run `npx wrangler secret put GOOGLE_MAPS_API_KEY` for production. Set a billing alert and low daily quotas on both APIs.
+5. **Google Maps key** (required for "Find a spot", and for `npm run spike` / `npm run scenario -- ... --live`): create a key restricted to Places API (New) and Routes API, put `GOOGLE_MAPS_API_KEY=...` in `letsmeetup/.dev.vars` for local use and run `npx wrangler secret put GOOGLE_MAPS_API_KEY` for production (without it "Find a spot" answers 503). Set a billing alert and low daily quotas on both APIs. Each calculation makes about 6 Places requests and 1-3 Routes requests.
+6. **Migrations**: `npm run db:remote` applies any new migration (step 7 added `0002_calculation_runs.sql`).
 
 ## Local development
 

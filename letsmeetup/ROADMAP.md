@@ -7,6 +7,8 @@ What is built, and the remaining steps in order. Rules and decisions are in [CLA
 - [x] **1. Skeleton:** Worker + static assets on `letsmeetup.diarmu.id`, D1 schema, Google sign-in, hashed cookie sessions, CSRF header/Origin check.
 - [x] **2. Google spike:** `npm run spike` ran real Places + Routes calls. Findings: the matrix accepts `arrivalTime`; Nearby Search returns rating, hours, outdoor seating etc. with the full field mask; walking is unrealistic beyond short trips. Raw responses are in `fixtures/` (git-ignored).
 - [x] **3. Neighbourhoods:** `public/areas.json` (279 areas), on-device snapping (`public/snap.js`), server lookup by id (`src/areas.js`), preview picker, tests.
+- [x] **8. Hardening:** rate limits, daily retention cron, delete-my-data, privacy page, security headers (CSP report-only until checked in a browser), structured logging, launch checklist, and an independent security review whose findings are fixed. 175 tests.
+- [x] **7. Run it:** `POST /calculate` with guards, background run, polling, results UI, out-of-date flag, stale-run cleanup, per-event and daily caps. 147 tests.
 - [x] **6. The calculation:** candidate areas (centroid, median, minimax and time-weighted forms), venue search and filters with relaxation, shortlist, journey limits, scoring, diverse labelled picks and journey summaries; `npm run scenario`. 118 tests. Weights are first guesses, to be tuned on real recordings.
 - [x] **5. Provider layer and replay harness:** normalised types and interfaces, Google Places + Routes providers (batching under the transit cap, de-duplicated origins, arrival times, retries), HTTP-level record/replay, shared contract suite, offline fakes, scenario recorder (`npm run record`). 76 tests.
 - [x] **4. Events:** create, share link, join, set your neighbourhood and mode, organiser lock/remove/delete, Turnstile, limits, API tests (see the notes under step 4 below).
@@ -77,7 +79,9 @@ Pure functions over normalised types in `src/calc/`, so they run offline against
 - **Scenarios** (`test/scenarios/*.json`): realistic groups with expected qualitative outcomes, e.g. four people spread across north/south/east with one cyclist (the spike scenario), two people at opposite ends of one line, a group that all live in one area, one person very far out, someone with a tight `max_minutes`. Tests assert properties (nobody over their limit, furthest person not worse than X, picks are diverse), not exact venues.
 - **Weight tuning** is done against replayed fixtures only. Record new fixtures sparingly (each costs real money).
 
-## 7. Run it: async calculation and results
+## 7. Run it: async calculation and results (built)
+
+*Built as described below, with these differences:* every run counts against the per-event cap of 5 (failed runs too, because they spend API calls); results are stored as JSON on `calc_runs` (`result_json`), so the `suggestions` and `travel_times` tables from 0001 are unused and reserved for voting; the daily budget is a counter in D1 (`usage_counters`, default 30 a day, `CALC_DAILY_LIMIT` to change); stale runs are reaped lazily when the event is read or a new run starts, not by a cron. **To do before this works live:** `npm run db:remote`, `npx wrangler secret put GOOGLE_MAPS_API_KEY`, deploy, then try it with two real people. **For step 8:** the stored result contains Google place details (names, addresses, ratings, hours), so the retention job must delete results within Google's caching limit (about 30 days) and the page already credits Google Maps. The original plan follows.
 
 - `POST /api/events/:code/calculate` (owner): checks at least 2 located participants, the per-event run cap (3), a global daily budget guard (a counter in D1 that refuses runs past a limit), then creates a `calc_runs` row (`running`), snapshots the inputs, sets the event to `calculating` and does the work in `ctx.waitUntil`. Returns immediately.
 - The work: step 6 → write `suggestions` and `travel_times` → `calc_runs.status = done`, event `done`. On any error: `failed` with a user-safe message and the real error logged. A stale-run reaper (a run still `running` after a few minutes is marked `failed`).
@@ -85,7 +89,9 @@ Pure functions over normalised types in `src/calc/`, so they run offline against
 - **Results UI:** 3-5 cards (venue name, rating, why it won, "Open in Google Maps" link), a per-person travel table with mode and minutes, a clear "X travels furthest (N min)" flag, and the cost-free "re-run" for the owner after changes. Google attribution as the terms require. A map is optional (an OpenStreetMap/Leaflet map of the venues and participants' areas).
 - Check the Workers `waitUntil` time limit against a realistic run; if it is marginal, move the work to a Cloudflare Queue (needs the paid plan).
 
-## 8. Hardening and launch
+## 8. Hardening and launch (built)
+
+*Built; see README "Security, privacy and operations" and "Launch checklist".* An independent review found, and the code now fixes: other people's limits visible on the "no results" screen; the daily budget leaking on races and no per-user daily cap; an event able to get stuck "calculating"; people who left still present in stored results; a nameless Google account showing its email as a display name; request bodies buffered before the size check; the Worker reachable on `workers_dev`; and forged key ids forcing Google key refetches. Writing the tests for the stuck-event fix also exposed a real bug (an un-awaited handler promise escaping the error handler), fixed. **Still to do by hand:** the launch checklist, in particular enforcing the CSP after a browser check. The original plan follows.
 
 - Security headers: add a Content-Security-Policy (allow `accounts.google.com`, Turnstile, `api.postcodes.io`, and OpenStreetMap tiles if a map is used).
 - Rate limiting on auth, event creation and calculate (Cloudflare rate-limiting rules or a D1 counter).

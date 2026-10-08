@@ -84,10 +84,11 @@ test('people who were left out are mentioned', () => {
 });
 
 test('no results: a reason in plain words, and the closest options say who they fail', () => {
-  const miss = suggestion({ exceeds: [{ name: 'Bob', minutes: 45, limit: 40 }, { name: 'Alice', minutes: 50, limit: 30 }] });
+  const miss = suggestion({ exceeds: [{ name: 'Bob' }, { name: 'Alice' }] });
   const box = mount(results({ status: 'no_results', reason: 'no_venue_within_limits', suggestions: [], closestMisses: [miss] }));
   assert.match(box.textContent, /within everyone's limits/);
-  assert.match(box.textContent, /Too far for: Bob \(45 min, limit 40\), Alice \(50 min, limit 30\)/);
+  assert.match(box.textContent, /Too far for: Bob, Alice/);
+  assert.doesNotMatch(box.textContent, /limit \d/); // never shows anyone's limit
   for (const reason of ['no_venues_found', 'no_venues_matched', 'journeys_unavailable', 'something_new']) {
     const t = mount(results({ status: 'no_results', reason, suggestions: [], closestMisses: [] })).textContent;
     assert.ok(t.length > 30, reason); // always a human sentence

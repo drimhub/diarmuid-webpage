@@ -27,7 +27,7 @@ export function cleanText(value) {
 // Others only ever see a first name.
 export function firstName(fullName) {
   const first = cleanText(fullName).split(' ')[0];
-  return (first || 'Friend').slice(0, LIMITS.displayNameMax);
+  return (first && !first.includes('@') ? first : 'Friend').slice(0, LIMITS.displayNameMax);
 }
 
 export function validateNewEvent(body, now = Date.now()) {

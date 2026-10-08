@@ -18,6 +18,7 @@ beforeEach(() => {
     ASSETS: { fetch: async () => new Response('asset') },
     GOOGLE_CLIENT_ID: 'test-client',
     TURNSTILE_DISABLED: '1',
+    RATE_LIMITS_OFF: '1',
     TEST_PROVIDERS: { places: createFakePlaces(), routing: createFakeRouting() },
   };
 });
@@ -262,7 +263,9 @@ test('impossible limits come back as an honest, explained result', async () => {
   assert.equal(r.status, 'no_results');
   assert.equal(r.reason, 'no_venue_within_limits');
   assert.ok(r.closestMisses.length > 0);
-  assert.ok(r.closestMisses[0].exceeds.every((x) => typeof x.name === 'string' && x.minutes > x.limit));
+  // Who it was too far for, but never anyone's limit: that number is private to them.
+  assert.ok(r.closestMisses[0].exceeds.length > 0 && r.closestMisses[0].exceeds.every((x) => typeof x.name === 'string' && Object.keys(x).join() === 'name'));
+  assert.doesNotMatch(JSON.stringify(r), /"limit"|maxMinutes":10/);
 });
 
 test('everyone in the event can watch a run in progress', async () => {

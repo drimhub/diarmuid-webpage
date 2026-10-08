@@ -11,10 +11,17 @@ import { verifyTurnstile } from './turnstile.js';
 import { LIMITS, firstName, validateMe, validateNewEvent } from './validate.js';
 import { RUN_LIMITS, executeRun, reapStaleRuns, startRun } from './calculation.js';
 import { shapeRun } from './results.js';
+import { limited } from './ratelimit.js';
 
 const nowIso = () => new Date().toISOString();
 const CODE = '([a-z2-7]{10})';
 const UUID = '([0-9a-f-]{36})';
+
+// Earlier suggestions mention the people who were in the event then (first names, journey times).
+// When someone leaves or is removed those are erased; the run itself stays so it still counts
+// towards the event's cap. The page shows them as expired and the organiser can run it again.
+const clearStoredResults = (db, eventId) =>
+  db.prepare("UPDATE calc_runs SET result_json = NULL, input_snapshot = NULL WHERE event_id = ? AND status != 'running'").bind(eventId);
 
 const loadEvent = (db, code) => db.prepare('SELECT * FROM events WHERE join_code = ?').bind(code).first();
 const loadMe = (db, eventId, userId) =>
@@ -24,6 +31,11 @@ export async function handleEvents(request, env, url, user, ctx) {
   const { pathname } = url;
   const method = request.method;
   let m;
+
+  if (method !== 'GET') {
+    const tooMany = await limited(env, 'mutate', user.id);
+    if (tooMany) return tooMany;
+  }
 
   if (pathname === '/api/events') {
     if (method === 'GET') return listEvents(env, user);
@@ -56,6 +68,8 @@ export async function handleEvents(request, env, url, user, ctx) {
 }
 
 async function createEvent(request, env, user) {
+  const tooMany = await limited(env, 'createEvent', user.id);
+  if (tooMany) return tooMany;
   const body = await readJson(request);
   if (!body) return error('Invalid request', 400);
 
@@ -193,6 +207,8 @@ async function getEvent(env, user, code) {
 }
 
 async function joinEvent(env, user, code) {
+  const tooMany = await limited(env, 'join', user.id);
+  if (tooMany) return tooMany;
   const ev = await loadEvent(env.DB, code);
   if (!ev) return error('Event not found', 404);
 
@@ -242,7 +258,10 @@ async function leaveEvent(env, user, code) {
   if (!ev) return error('Event not found', 404);
   if (ev.owner_id === user.id) return error('The organiser cannot leave; delete the event instead', 400);
   if (ev.status === 'calculating') return error('A calculation is running, try again in a moment', 409);
-  await env.DB.prepare('DELETE FROM participants WHERE event_id = ? AND user_id = ?').bind(ev.id, user.id).run();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM participants WHERE event_id = ? AND user_id = ?').bind(ev.id, user.id),
+    clearStoredResults(env.DB, ev.id),
+  ]);
   return json({ ok: true });
 }
 
@@ -273,7 +292,10 @@ async function removeParticipant(env, user, code, participantId) {
   if (!target) return error('Not found', 404);
   if (target.user_id === ev.owner_id) return error('You cannot remove the organiser', 400);
 
-  await env.DB.prepare('DELETE FROM participants WHERE id = ?').bind(target.id).run();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM participants WHERE id = ?').bind(target.id),
+    clearStoredResults(env.DB, ev.id),
+  ]);
   return json({ ok: true });
 }
 
@@ -289,6 +311,8 @@ async function calculate(env, ctx, user, code) {
   const ev = await loadEvent(env.DB, code);
   if (!ev) return error('Event not found', 404);
   if (ev.owner_id !== user.id) return error('Only the organiser can do that', 403);
+  const tooMany = (await limited(env, 'calculate', user.id)) || (await limited(env, 'calculateDaily', user.id));
+  if (tooMany) return tooMany;
 
   const { results } = await env.DB
     .prepare('SELECT id, display_name, area_id, mode, max_minutes FROM participants WHERE event_id = ?')
