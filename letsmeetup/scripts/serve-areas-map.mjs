@@ -14,6 +14,7 @@ const FILES = {
   '/': ['dev/areas-map.html', 'text/html; charset=utf-8'],
   '/snap.js': ['public/snap.js', 'text/javascript; charset=utf-8'],
   '/areas.json': ['public/areas.json', 'application/json'],
+  '/extras.json': ['dev/extras.json', 'application/json'],
 };
 
 createServer(async (req, res) => {

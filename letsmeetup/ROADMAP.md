@@ -6,7 +6,10 @@ What is built, and the remaining steps in order. Rules and decisions are in [CLA
 
 - [x] **1. Skeleton:** Worker + static assets on `letsmeetup.diarmu.id`, D1 schema, Google sign-in, hashed cookie sessions, CSRF header/Origin check.
 - [x] **2. Google spike:** `npm run spike` ran real Places + Routes calls. Findings: the matrix accepts `arrivalTime`; Nearby Search returns rating, hours, outdoor seating etc. with the full field mask; walking is unrealistic beyond short trips. Raw responses are in `fixtures/` (git-ignored).
-- [x] **3. Neighbourhoods:** `public/areas.json` (242 areas), on-device snapping (`public/snap.js`), server lookup by id (`src/areas.js`), preview picker, tests.
+- [x] **3. Neighbourhoods:** `public/areas.json` (279 areas), on-device snapping (`public/snap.js`), server lookup by id (`src/areas.js`), preview picker, tests.
+- [x] **6. The calculation:** candidate areas (centroid, median, minimax and time-weighted forms), venue search and filters with relaxation, shortlist, journey limits, scoring, diverse labelled picks and journey summaries; `npm run scenario`. 118 tests. Weights are first guesses, to be tuned on real recordings.
+- [x] **5. Provider layer and replay harness:** normalised types and interfaces, Google Places + Routes providers (batching under the transit cap, de-duplicated origins, arrival times, retries), HTTP-level record/replay, shared contract suite, offline fakes, scenario recorder (`npm run record`). 76 tests.
+- [x] **4. Events:** create, share link, join, set your neighbourhood and mode, organiser lock/remove/delete, Turnstile, limits, API tests (see the notes under step 4 below).
 
 ## Before moving on (small, do soon)
 
@@ -15,7 +18,9 @@ What is built, and the remaining steps in order. Rules and decisions are in [CLA
 - [ ] Sanity-check the area list with `npm run areas:map` (browse all areas on OpenStreetMap). Fix names/anchors via `scripts/build-areas.mjs`.
 - [ ] Set Google Cloud daily quotas (about 100 requests/day per API while testing) and a $25 budget alert.
 
-## 4. Events: create, share, join
+## 4. Events: create, share, join (built)
+
+*Built as specified below, with these differences:* the API uses `eventType`/`startAt`/`areaId` camelCase JSON; `GET /api/events` lists my events; link holders who have not joined see only the basics; there is no OG-tag shell yet (later); the "Find a spot" button is a disabled placeholder until step 7. Still to do for this step: try it in a real browser on a phone with real Google sign-in (needs the deploy and OAuth client ID).
 
 Nothing is saved from the UI until this step. Everything goes through `/api/*` with the existing session and CSRF checks.
 
@@ -34,7 +39,9 @@ Nothing is saved from the UI until this step. Everything goes through `/api/*` w
 - **Tests:** API handler tests against a local D1 (`wrangler`'s test setup or an in-memory SQLite shim), covering limits, ownership checks, and that no endpoint accepts or returns coordinates.
 - **Docs:** README API table, schema notes.
 
-## 5. Provider layer and replay harness
+## 5. Provider layer and replay harness (built)
+
+*Built, with these notes:* record/replay is at the HTTP level (so the real provider code is exercised) rather than wrapping provider methods; the offline `testing/fake-providers.mjs` and `testing/google-stub.mjs` are the everyday dev tools; `src/hours.js` holds the opening-hours logic. **For step 6:** replay only serves requests that were recorded, and the heuristics choose their own candidate areas, so a recorded scenario fixes the centres to search (see `scenarios/`). Develop the heuristics against the fakes, and use recorded scenarios as realism checks, re-recording when the candidate generation changes. The original plan follows.
 
 Do this before the heuristics, so tuning never touches live paid APIs. See the provider rules in CLAUDE.md.
 
@@ -45,7 +52,17 @@ Do this before the heuristics, so tuning never touches live paid APIs. See the p
 - **Record/replay harness:** a `recording` wrapper that saves provider input and output keyed by a hash, and a `replay` provider that serves them with no network. Convert the spike's `fixtures/` into the first scenario, then record a few more (see step 6). Fixtures stay git-ignored (Google content); document how to regenerate them.
 - **Contract tests:** run the same assertions against every provider implementation (and the replay provider) so a future TravelTime/Foursquare/OSM provider can be dropped in.
 
-## 6. The calculation (heuristics, the bulk of the work)
+## 6. The calculation (built; tuning continues)
+
+**First live result (stockwell-blackfriars-hampstead, drinks, Sat 19:30).** Google returned 118 venues over 6 searches; 49 qualified (67 were the wrong type, mostly hotels and restaurants; 2 closed; none failed the review bar, because central London places all have thousands of reviews). Top picks: Simmons Bar (Oxford Circus, 4.7 stars, 27/15/20 min), Flat Iron Square (Southwark), Gordon's Wine Bar (Covent Garden), SOUND (Marble Arch), The Blackfriar. Cost: 6 Places requests and 2 Routes requests (45 elements). The ranking within the pool looks sensible. `node scripts/explain-scenario.mjs scenarios/<file>.json` replays a recording and prints every costed venue, not just the picks.
+
+**Known limitation, found by that run: candidates come from straight-line geometry, and London's travel times are network-shaped.** Stockwell and Hampstead are on the same Northern line, so the two transit people have a direct, quick journey to Euston (22 and 11 min), Bank (22 and 21) or Borough, none of which were searched, while the geometric centres drifted to Oxford Circus and Marble Arch (the best of which gave a 27 min longest journey vs 22 at Euston). Probe of 9 hubs for two transit people (18 elements): Euston 22/11, Bank 22/21, Oxford Circus 22/25, King's Cross 30/17, London Bridge 25/28, Waterloo 32/26. Fix options for the next iteration:
+1. **Precomputed area-to-hub transit times** (best): about 25 interchange hubs (Bank, Euston, King's Cross, Liverpool Street, London Bridge, Waterloo, Victoria, Oxford Circus, Baker Street, Paddington, Stratford, Canary Wharf, Clapham Junction, Vauxhall, Angel, Old Street, Borough, Elephant & Castle, ...) x 279 areas is about 7,000 elements, one-off, then candidate generation is network-aware, free per run, instant, offline and deterministic. Cost depends on which SKU transit matrices bill under: if Essentials ($5 per 1,000, 10,000 free a month) it is free; if Enterprise it is roughly $35-105 once. **Decide after reading the SKU billing report for the spike.**
+2. **Per-run hub probe:** route each distinct transit origin to the ~12 hubs that pass a straight-line pre-filter (e.g. 3 people x 12 = 36 elements, about $0.20-0.55 per run, growing with group size) and add the best 3 hubs to the candidates. No upfront cost, but every run pays.
+3. Both leave the existing geometric candidates in place for cyclists, walkers and areas away from the hubs.
+Either way the hubs become extra candidate areas and everything downstream (filters, shortlist, scoring, picks) is unchanged.
+
+*Built as `src/calc/` (see README "The calculation"). Differences from the plan below: no precomputed area-to-area table (as planned); the shortlist is round-robin by review quality; the "open late" rule is open for 3+ hours and until 23:00; unknown opening hours are allowed but penalised and flagged. **Still to do for this step:** record the real scenario (`npm run scenario -- scenarios/stockwell-blackfriars-hampstead.json --live --yes`), read the suggestions for sense, and tune the weights in `src/calc/config.js` against replays. Add more scenarios (a lone far-out person, all in one area, a tight personal limit, a cyclist-only group). The original plan follows.*
 
 Pure functions over normalised types in `src/calc/`, so they run offline against replayed fixtures.
 

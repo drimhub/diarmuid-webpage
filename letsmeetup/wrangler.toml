@@ -10,15 +10,19 @@ directory = "./public"
 binding = "ASSETS"
 # API requests go to the Worker first; everything else is served as a static file.
 run_worker_first = ["/api/*"]
+# /e/<code> and other app routes serve index.html; the front end routes them.
+not_found_handling = "single-page-application"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "letsmeetup"
-# Replace after `wrangler d1 create letsmeetup` (see README.md).
-database_id = "REPLACE_WITH_DATABASE_ID"
+database_id = "4f62e6e1-f3ee-4984-90db-54764fc67954"
 
 [vars]
 # Public value (also served by /api/config). Replace with your OAuth web client ID.
-GOOGLE_CLIENT_ID = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
+GOOGLE_CLIENT_ID = "610998004598-n1b3ieli40nkuc9dljp6n50g8tlu783o.apps.googleusercontent.com"
+# Turnstile site key (public). This is Cloudflare's always-pass test key; replace it with the real
+# widget's key for letsmeetup.diarmu.id, and set the secret: `npx wrangler secret put TURNSTILE_SECRET`.
+TURNSTILE_SITE_KEY = "0x4AAAAAAFRKRe0Vc3O0slJc"
 PLACES_PROVIDER = "google"
 ROUTING_PROVIDER = "google"

@@ -1,0 +1,13 @@
+{
+  "name": "stockwell-blackfriars-hampstead",
+  "note": "Three people: two close together in central south London (one cycling) and one far north. A realistic spread with a clear furthest person.",
+  "eventType": "drinks",
+  "daysAhead": 2,
+  "startLondon": "19:30",
+  "tags": [],
+  "participants": [
+    { "name": "Diarmuid", "area": "stockwell", "mode": "transit" },
+    { "name": "Cian", "area": "blackfriars", "mode": "bike", "maxMinutes": 40 },
+    { "name": "Friend", "area": "hampstead", "mode": "transit" }
+  ]
+}

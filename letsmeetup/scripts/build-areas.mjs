@@ -68,11 +68,61 @@ const MUST_HAVE = [
   'Gospel Oak', 'Hendon', 'Mill Hill', 'Burnt Oak', 'Dagenham', 'Hornchurch', 'Upminster', 'Plumstead',
   'Abbey Wood', 'Erith', 'Lee', 'Grove Park', 'Hither Green', 'Honor Oak', 'Elmers End', 'West Norwood',
 ];
-// Must-haves OSM has no suitable node for. Anchors are approximate (main station / centre).
+// Must-haves OSM has no suitable node for, and gap-fillers for zones 1-3 where people think in
+// station names (Blackfriars, Bank, ...). Anchors are approximate (the station / centre).
 const INCLUDE_EXTRA = [
+  // Original gaps
   { name: 'London Bridge', lat: 51.5045, lon: -0.0865 },
   { name: 'Borough', lat: 51.5011, lon: -0.0943 },
   { name: 'Westbourne Park', lat: 51.5210, lon: -0.2010 },
+  // City and central stations
+  { name: 'Blackfriars', lat: 51.5117, lon: -0.1031 },
+  { name: 'Bank', lat: 51.5133, lon: -0.0886 },
+  { name: 'Liverpool Street', lat: 51.5178, lon: -0.0823 },
+  { name: 'Aldgate', lat: 51.5143, lon: -0.0755 },
+  { name: 'Tower Hill', lat: 51.5098, lon: -0.0766 },
+  { name: 'Farringdon', lat: 51.5203, lon: -0.1053 },
+  { name: 'Old Street', lat: 51.5263, lon: -0.0873 },
+  { name: 'Euston', lat: 51.5282, lon: -0.1337 },
+  { name: 'Oxford Circus', lat: 51.5152, lon: -0.1415 },
+  { name: 'Marble Arch', lat: 51.5136, lon: -0.1586 },
+  { name: 'Sloane Square', lat: 51.4924, lon: -0.1565 },
+  { name: 'South Kensington', lat: 51.4941, lon: -0.1738 },
+  // West and south-west (zones 2-3)
+  { name: 'Holland Park', lat: 51.5075, lon: -0.2060 },
+  { name: 'Ladbroke Grove', lat: 51.5172, lon: -0.2107 },
+  { name: 'White City', lat: 51.5120, lon: -0.2240 },
+  { name: 'East Acton', lat: 51.5170, lon: -0.2470 },
+  { name: 'Kensal Green', lat: 51.5307, lon: -0.2250 },
+  { name: 'Willesden Junction', lat: 51.5322, lon: -0.2438 },
+  { name: 'Ravenscourt Park', lat: 51.4942, lon: -0.2359 },
+  { name: 'Barons Court', lat: 51.4905, lon: -0.2139 },
+  { name: 'West Brompton', lat: 51.4872, lon: -0.1953 },
+  { name: 'Fulham Broadway', lat: 51.4802, lon: -0.1950 },
+  { name: 'Parsons Green', lat: 51.4753, lon: -0.2011 },
+  { name: 'Clapham Junction', lat: 51.4642, lon: -0.1704 },
+  { name: 'Wandsworth Common', lat: 51.4560, lon: -0.1670 },
+  { name: 'Clapham Common', lat: 51.4618, lon: -0.1384 },
+  { name: 'Battersea Park', lat: 51.4776, lon: -0.1479 },
+  { name: 'Nine Elms', lat: 51.4800, lon: -0.1300 },
+  { name: 'Loughborough Junction', lat: 51.4659, lon: -0.1021 },
+  { name: 'Tooting Bec', lat: 51.4357, lon: -0.1597 },
+  { name: 'Streatham Common', lat: 51.4180, lon: -0.1360 },
+  { name: 'Gipsy Hill', lat: 51.4310, lon: -0.0850 },
+  // North and east (zones 2-3)
+  { name: 'Finchley Road', lat: 51.5472, lon: -0.1803 },
+  { name: 'Caledonian Road', lat: 51.5481, lon: -0.1188 },
+  { name: 'Canonbury', lat: 51.5485, lon: -0.0920 },
+  { name: 'De Beauvoir', lat: 51.5385, lon: -0.0800 },
+  { name: 'Manor House', lat: 51.5712, lon: -0.0958 },
+  { name: 'Seven Sisters', lat: 51.5832, lon: -0.0749 },
+  { name: 'Victoria Park', lat: 51.5362, lon: -0.0381 },
+  { name: 'West Ham', lat: 51.5287, lon: 0.0050 },
+  { name: 'Isle of Dogs', lat: 51.4950, lon: -0.0200 },
+  { name: 'Canada Water', lat: 51.4982, lon: -0.0502 },
+  { name: 'Lea Bridge', lat: 51.5650, lon: -0.0370 },
+  { name: 'Tottenham Hale', lat: 51.5882, lon: -0.0594 },
+  { name: 'Putney Bridge', lat: 51.4682, lon: -0.2089 },
 ];
 const mustKey = (s) => s.normalize('NFKD').toLowerCase().replace(/[^a-z]+/g, '');
 const MUST = new Map(MUST_HAVE.map((n) => [mustKey(n), n]));
@@ -123,7 +173,11 @@ const all = data.elements
   .filter((e) => e.d <= MAX_KM_FROM_CENTRE && !EXCLUDE.has(e.name) && !EXCLUDE_PATTERN.test(e.name))
   .sort((a, b) => b.r - a.r || a.d - b.d);
 
-for (const x of INCLUDE_EXTRA) if (!all.some((c) => c.name === x.name)) all.unshift({ ...x, must: true, r: 1000, d: km(CENTRE, x) });
+// Curated entries win over any same-named OSM node, so the anchor is the one listed above.
+for (const x of INCLUDE_EXTRA) {
+  for (let i = all.length - 1; i >= 0; i--) if (all[i].name === x.name) all.splice(i, 1);
+  all.unshift({ ...x, must: true, r: 1000, d: km(CENTRE, x) });
+}
 const found = new Set(all.filter((c) => c.must).map((c) => mustKey(c.name)));
 const missing = MUST_HAVE.filter((n) => !found.has(mustKey(n)) && !found.has(mustKey(RENAME[n] || n)));
 if (missing.length) console.log('Must-have areas NOT found in OSM data (add manually or fix the name):', missing.join(', '));
@@ -141,6 +195,9 @@ for (const c of candidates) {
   kept.push(c);
 }
 
+const droppedExtras = INCLUDE_EXTRA.filter((x) => !kept.some((k) => k.name === x.name)).map((x) => x.name);
+if (droppedExtras.length) console.log('INCLUDE_EXTRA dropped (too close to another must-have):', droppedExtras.join(', '));
+
 kept.sort((a, b) => a.name.localeCompare(b.name));
 const ids = new Set();
 const areas = kept.map((k) => {
@@ -151,4 +208,6 @@ const areas = kept.map((k) => {
 });
 
 writeFileSync(OUT, JSON.stringify(areas, null, 1) + '\n');
+// Names of the hand-placed anchors, so dev/areas-map.html can show (and let you drag) just those.
+writeFileSync(join(here, '..', 'dev', 'extras.json'), JSON.stringify(INCLUDE_EXTRA.map((x) => x.name), null, 1) + '\n');
 console.log(`${candidates.length} candidates -> ${areas.length} areas written to public/areas.json`);
