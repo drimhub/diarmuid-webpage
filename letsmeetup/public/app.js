@@ -2,7 +2,9 @@
 // Rules: every piece of server- or user-supplied text goes in via textContent / text nodes, never
 // innerHTML. The only location data ever sent is an area id (see snap.js).
 
-import { loadAreas, searchAreas, snapToArea, looksLikePostcode, lookupPostcode, getCurrentPosition } from '/snap.js';
+import { loadAreas } from '/snap.js';
+import { areaPicker } from '/picker.js';
+import { guestForm } from '/guests.js';
 import { londonLocalToUtcIso, formatLondon, defaultStartLocal } from '/time.js';
 import { MODE_LABELS, h, renderResults } from '/view.js';
 
@@ -168,58 +170,6 @@ async function homeView() {
   };
 }
 
-// Type-ahead / postcode / "use my location" picker. Only the chosen area's id leaves this component.
-function areaPicker(initialId) {
-  let chosen = state.areas.find((a) => a.id === initialId) || null;
-  const input = h('input', { type: 'search', placeholder: 'Area or postcode, e.g. Hoxton or E8', autocomplete: 'off', 'aria-label': 'Area or postcode' });
-  const list = h('ul', { class: 'picks' });
-  const picked = h('p', { class: 'picked', role: 'status' });
-
-  function choose(area, note) {
-    chosen = area;
-    list.replaceChildren();
-    picked.textContent = area ? `Travelling from ${area.name}${note ? ` (${note})` : ''}` : '';
-  }
-  async function snap(point, note) {
-    const hit = snapToArea(point.lat, point.lng, state.areas);
-    if (hit) choose(hit.area, note);
-    else picked.textContent = "That's outside the area we cover (Greater London).";
-  }
-
-  input.addEventListener('input', () => {
-    picked.textContent = chosen ? `Travelling from ${chosen.name}` : '';
-    list.replaceChildren(...searchAreas(input.value, state.areas).map((a) =>
-      h('li', {}, h('button', { type: 'button', onclick: () => { choose(a); input.value = ''; } }, a.name))));
-  });
-  input.addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter') return;
-    e.preventDefault(); // don't submit the surrounding form
-    const text = input.value.trim();
-    if (!looksLikePostcode(text)) return;
-    const point = await lookupPostcode(text).catch(() => null);
-    if (!point) { picked.textContent = "Couldn't find that postcode."; return; }
-    await snap(point, 'from your postcode');
-    input.value = '';
-  });
-
-  const locate = h('button', { type: 'button', onclick: async () => {
-    try {
-      picked.textContent = 'Locating…';
-      await snap(await getCurrentPosition(), 'from your location');
-    } catch (e) {
-      picked.textContent = e.message;
-    }
-  } }, 'Use my location');
-
-  choose(chosen);
-  return {
-    el: h('div', {}, input, list,
-      h('p', { class: 'muted small' }, 'Type an area, or a postcode and press Enter. Your exact location stays on your device; only the neighbourhood is shared.'),
-      h('div', { class: 'row' }, locate), picked),
-    getArea: () => chosen,
-  };
-}
-
 async function eventView(code) {
   let data = await api(`/api/events/${code}`);
   const ev = () => data.event;
@@ -227,6 +177,22 @@ async function eventView(code) {
   const status = h('span', { class: 'chip' });
   const partsBox = h('div', {});
   const ownerBox = h('div', {});
+
+  // Organiser only: add (or edit) a friend who won't sign in. The server enforces all of it again.
+  const guests = data.me && data.me.isOwner ? guestForm({
+    areas: state.areas,
+    onSubmit: async (g) => {
+      await api(g.id ? `/api/events/${code}/guests/${g.id}` : `/api/events/${code}/guests`, {
+        method: g.id ? 'PUT' : 'POST',
+        body: { name: g.name, areaId: g.areaId, mode: g.mode, maxMinutes: g.maxMinutes },
+      });
+      await refresh();
+    },
+  }) : null;
+  const guestCard = guests && h('section', { class: 'card', hidden: data.event.status !== 'open' },
+    h('h2', {}, 'Add someone'),
+    h('p', { class: 'muted small' }, "For a friend who won't sign in. Tell us where they are travelling from and how, and we plan for them too."),
+    guests.el);
   const resultsBox = h('div', {});
   const resultsCard = h('section', { class: 'card' }, h('h2', {}, 'Suggested spots'), resultsBox);
   const wasOpen = data.event.status === 'open';
@@ -251,15 +217,20 @@ async function eventView(code) {
 
   function paintParticipants() {
     if (!data.me) { partsBox.replaceChildren(); return; }
+    const owner = data.me.isOwner;
     partsBox.replaceChildren(h('ul', { class: 'plain' }, data.participants.map((p) => h('li', {},
       h('div', {},
-        h('strong', {}, p.name), p.isMe && ' (you)', p.isOwner && h('span', { class: 'chip', style: 'margin-left:.4rem' }, 'Organiser'),
+        h('strong', {}, p.name), p.isMe && ' (you)',
+        p.isOwner && h('span', { class: 'chip', style: 'margin-left:.4rem' }, 'Organiser'),
+        p.isGuest && h('span', { class: 'chip', style: 'margin-left:.4rem' }, owner ? 'Added by you' : 'Added by organiser'),
         h('div', { class: 'muted small' }, p.hasLocation ? `${p.areaName || 'Unknown area'} · ${MODE_LABELS[p.mode] || p.mode}` : "Hasn't said where yet")),
-      data.me.isOwner && !p.isOwner && h('button', { class: 'danger', type: 'button', onclick: async () => {
-        if (!confirm(`Remove ${p.name} from this event?`)) return;
-        try { await api(`/api/events/${code}/participants/${p.id}`, { method: 'DELETE' }); } catch (e) { alert(e.message); }
-        refresh();
-      } }, 'Remove')))));
+      owner && !p.isOwner && h('div', { class: 'row' },
+        p.isGuest && guests && h('button', { type: 'button', onclick: () => guests.edit({ id: p.id, name: p.name, areaId: p.areaId, mode: p.mode, maxMinutes: p.maxMinutes ?? null }) }, 'Edit'),
+        h('button', { class: 'danger', type: 'button', onclick: async () => {
+          if (!confirm(`Remove ${p.name} from this event?`)) return;
+          try { await api(`/api/events/${code}/participants/${p.id}`, { method: 'DELETE' }); } catch (e) { alert(e.message); }
+          refresh();
+        } }, 'Remove'))))));
   }
 
   function findButton() {
@@ -350,7 +321,7 @@ async function eventView(code) {
     h('div', { class: 'share' }, shareInput, copy,
       navigator.share && h('button', { type: 'button', onclick: () => navigator.share({ title: e0.title, url }).catch(() => {}) }, 'Share')));
 
-  const picker = areaPicker(data.me.areaId);
+  const picker = areaPicker({ areas: state.areas, initialAreaId: data.me.areaId });
   const mode = h('select', {}, Object.entries(MODE_LABELS).map(([v, l]) => h('option', { value: v, selected: v === data.me.mode }, l)));
   const maxMin = h('input', { type: 'number', min: 10, max: 180, step: 5, inputmode: 'numeric', placeholder: 'No limit', value: data.me.maxMinutes ?? '' });
   const saveMsg = h('p', { class: 'error', role: 'status' });
@@ -387,7 +358,7 @@ async function eventView(code) {
 
   return {
     el: h('div', {}, top, resultsCard, shareCard, journey,
-      h('section', { class: 'card' }, h('h2', {}, "Who's in"), partsBox, ownerBox)),
+      h('section', { class: 'card' }, h('h2', {}, "Who's in"), partsBox, ownerBox), guestCard),
     // Keep the "who's in" list fresh while the tab is open, without touching the form.
     mount: () => {
       const mine = state.renderToken;

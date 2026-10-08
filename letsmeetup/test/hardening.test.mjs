@@ -315,6 +315,8 @@ test('the privacy page says what the code actually does', () => {
   assert.match(page, new RegExp(`${RETENTION.resultDays} days after they were worked out`));
   assert.match(page, new RegExp(`after ${RETENTION.inactiveUserDays} days`));
   assert.match(page, /Delete my data/);
+  assert.match(page, /People an organiser adds/); // guests are disclosed
+  assert.match(page, /ask them to remove you/);
   assert.match(read('index.html'), /href="\/privacy\.html"/);
   assert.doesNotMatch(page, /@[a-z0-9.-]+\.[a-z]{2,}/i); // no personal email published on the page
 });

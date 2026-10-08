@@ -8,7 +8,7 @@
 import { getArea } from './areas.js';
 import { error, json, newId, randomCode, readJson } from './util.js';
 import { verifyTurnstile } from './turnstile.js';
-import { LIMITS, firstName, validateMe, validateNewEvent } from './validate.js';
+import { LIMITS, firstName, validateGuest, validateMe, validateNewEvent } from './validate.js';
 import { RUN_LIMITS, executeRun, reapStaleRuns, startRun } from './calculation.js';
 import { shapeRun } from './results.js';
 import { limited } from './ratelimit.js';
@@ -57,6 +57,12 @@ export async function handleEvents(request, env, url, user, ctx) {
   }
   if ((m = pathname.match(new RegExp(`^/api/events/${CODE}/calculate$`)))) {
     return method === 'POST' ? calculate(env, ctx, user, m[1]) : error('Method not allowed', 405);
+  }
+  if ((m = pathname.match(new RegExp(`^/api/events/${CODE}/guests$`)))) {
+    return method === 'POST' ? addGuest(request, env, user, m[1]) : error('Method not allowed', 405);
+  }
+  if ((m = pathname.match(new RegExp(`^/api/events/${CODE}/guests/${UUID}$`)))) {
+    return method === 'PUT' ? editGuest(request, env, user, m[1], m[2]) : error('Method not allowed', 405);
   }
   if ((m = pathname.match(new RegExp(`^/api/events/${CODE}/lock$`)))) {
     return method === 'POST' ? setLocked(request, env, user, m[1]) : error('Method not allowed', 405);
@@ -202,6 +208,8 @@ async function getEvent(env, user, code) {
       areaName: p.area_id ? (getArea(p.area_id) || {}).name || null : null,
       mode: p.mode,
       hasLocation: !!p.area_id,
+      isGuest: p.user_id === null,
+      ...(p.user_id === null && ev.owner_id === user.id ? { maxMinutes: p.max_minutes } : {}),
     })),
   });
 }
@@ -326,4 +334,67 @@ async function calculate(env, ctx, user, code) {
   if (ctx && ctx.waitUntil) ctx.waitUntil(work);
   else await work;
   return json({ runId: started.runId }, 202);
+}
+
+// ---- people the organiser adds without them signing in ----
+// A "guest" is a participants row with no user. They never see the event; the organiser speaks for
+// them. They count towards the cap and are planned for exactly like anyone else.
+
+async function guestPreconditions(env, user, code) {
+  const ev = await loadEvent(env.DB, code);
+  if (!ev) return { response: error('Event not found', 404) };
+  if (ev.owner_id !== user.id) return { response: error('Only the organiser can do that', 403) };
+  if (ev.status === 'calculating') return { response: error('Suggestions are being worked out, try again in a moment', 409) };
+  if (ev.status !== 'open') return { response: error('This event is locked', 409) };
+  return { ev };
+}
+
+async function addGuest(request, env, user, code) {
+  const tooMany = await limited(env, 'addGuest', user.id);
+  if (tooMany) return tooMany;
+  const pre = await guestPreconditions(env, user, code);
+  if (pre.response) return pre.response;
+  const { ev } = pre;
+
+  const body = await readJson(request);
+  if (!body) return error('Invalid request', 400);
+  const parsed = validateGuest(body);
+  if (parsed.error) return error(parsed.error, 400);
+  const { name, areaId, mode, maxMinutes } = parsed.value;
+
+  const id = newId();
+  const now = nowIso();
+  // Conditional insert so guests and sign-ins racing for the last place can't exceed the cap.
+  const res = await env.DB
+    .prepare(
+      `INSERT INTO participants (id, event_id, user_id, display_name, area_id, mode, max_minutes, joined_at, updated_at)
+       SELECT ?, ?, NULL, ?, ?, ?, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM participants WHERE event_id = ?) < ?`,
+    )
+    .bind(id, ev.id, name, areaId, mode, maxMinutes, now, now, ev.id, ev.max_participants)
+    .run();
+  if (!res.meta.changes) return error('This event is full', 409);
+  return json({ id }, 201);
+}
+
+async function editGuest(request, env, user, code, participantId) {
+  const tooMany = await limited(env, 'addGuest', user.id);
+  if (tooMany) return tooMany;
+  const pre = await guestPreconditions(env, user, code);
+  if (pre.response) return pre.response;
+  const { ev } = pre;
+
+  const body = await readJson(request);
+  if (!body) return error('Invalid request', 400);
+  const parsed = validateGuest(body);
+  if (parsed.error) return error(parsed.error, 400);
+  const { name, areaId, mode, maxMinutes } = parsed.value;
+
+  // user_id IS NULL: this route can only ever change guests, never a signed-in person.
+  const res = await env.DB
+    .prepare('UPDATE participants SET display_name = ?, area_id = ?, mode = ?, max_minutes = ?, updated_at = ? WHERE id = ? AND event_id = ? AND user_id IS NULL')
+    .bind(name, areaId, mode, maxMinutes, nowIso(), participantId, ev.id)
+    .run();
+  if (!res.meta.changes) return error('Guest not found', 404);
+  return json({ ok: true });
 }

@@ -8,6 +8,7 @@ export const RATE_RULES = {
   auth:          { limit: 20, windowSeconds: 600 },   // per IP: Google sign-in attempts
   createEvent:   { limit: 6,  windowSeconds: 600 },   // per user
   join:          { limit: 30, windowSeconds: 600 },   // per user
+  addGuest:      { limit: 30, windowSeconds: 600 },   // per user: people the organiser adds without accounts
   calculate:     { limit: 5,  windowSeconds: 600 },   // per user
   calculateDaily: { limit: 12, windowSeconds: 86400 }, // per user: one account can't use up the whole service's daily budget
   mutate:        { limit: 90, windowSeconds: 600 },   // per user: every non-GET request to /api/events

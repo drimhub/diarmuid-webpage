@@ -47,7 +47,7 @@ const MUST_HAVE = [
   'Soho', 'Shoreditch', 'Angel', 'Clerkenwell', "King's Cross", 'Brixton', 'Bow', 'Deptford', 'Brockley',
   'Forest Hill', 'Crystal Palace', 'Hackney Wick', 'Finsbury Park', 'Archway', 'Tufnell Park', 'Barbican',
   'Pimlico', 'Belgravia', 'Westminster', "Earl's Court", 'Fitzrovia', 'Camden Town', 'Hoxton', 'Dalston',
-  'Peckham', 'Clapham', 'Bermondsey', 'Canary Wharf', 'Greenwich', 'Walthamstow',
+  'Peckham', 'Bermondsey', 'Canary Wharf', 'Greenwich', 'Walthamstow',
   'Hackney', 'Haggerston', 'Kentish Town', 'Highbury', 'Holloway', 'Hampstead', 'Battersea', 'Wimbledon',
   'Putney', 'Richmond', 'Kew', 'Hammersmith', 'Chiswick', 'Ealing', 'Acton', "Shepherd's Bush", 'Notting Hill',
   'Kensington', 'Chelsea', 'Fulham', 'Stratford', 'Leyton', 'Leytonstone', 'Lewisham', 'Catford', 'New Cross',
@@ -183,7 +183,7 @@ const missing = MUST_HAVE.filter((n) => !found.has(mustKey(n)) && !found.has(mus
 if (missing.length) console.log('Must-have areas NOT found in OSM data (add manually or fix the name):', missing.join(', '));
 
 const candidates = all;
-const MUST_GAP_KM = 0.45; // must-haves may sit close together (Soho / Covent Garden / Fitzrovia)
+const MUST_GAP_KM = 0.2; // must-haves may sit close together (Soho / Covent Garden / Fitzrovia; Notting Hill / Holland Park)
 const kept = [];
 const seenNames = new Set();
 for (const c of candidates) {
@@ -195,6 +195,9 @@ for (const c of candidates) {
   kept.push(c);
 }
 
+const keptKeys = new Set(kept.map((k) => mustKey(k.name)));
+const droppedMust = MUST_HAVE.filter((n) => !keptKeys.has(mustKey(RENAME[n] || n)) && !keptKeys.has(mustKey(n)) && found.has(mustKey(n)));
+if (droppedMust.length) console.log('MUST_HAVE dropped by the spacing rule (move or merge them):', droppedMust.join(', '));
 const droppedExtras = INCLUDE_EXTRA.filter((x) => !kept.some((k) => k.name === x.name)).map((x) => x.name);
 if (droppedExtras.length) console.log('INCLUDE_EXTRA dropped (too close to another must-have):', droppedExtras.join(', '));
 

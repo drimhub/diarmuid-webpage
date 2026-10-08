@@ -42,3 +42,9 @@ Groups of friends in London sign in with Google, say roughly where they are trav
 - Rendering: text via `textContent`/text nodes only, links only plain Google Maps URLs (`public/view.js`, tested with hostile input). No inline scripts or handlers (the CSP relies on it).
 - When a person leaves, is removed or deletes their account, stored results that mention them are erased (`clearStoredResults`, `account.js`).
 - Stored Google place details are erased 30 days after the run (`retention.js`).
+
+## Guests (people the organiser adds without accounts)
+
+- A guest is a `participants` row with `user_id` NULL (the schema always allowed it). Only the organiser can add or edit them (`/guests`), only while the event is open, and the edit route can never touch a signed-in person (`user_id IS NULL` in the query).
+- They count towards the event's cap (conditional insert, like joining), are planned for like anyone else, and are deleted with the event.
+- A guest's longest-journey limit is returned to the organiser only; their name can't contain `@`. The privacy page discloses them; keep it in step.

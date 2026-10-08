@@ -336,6 +336,12 @@
   "lng": -0.0559
  },
  {
+  "id": "clerkenwell",
+  "name": "Clerkenwell",
+  "lat": 51.5237,
+  "lng": -0.1056
+ },
+ {
   "id": "colindale",
   "name": "Colindale",
   "lat": 51.5917,
@@ -580,6 +586,12 @@
   "name": "Friern Barnet",
   "lat": 51.6129,
   "lng": -0.1586
+ },
+ {
+  "id": "fulham",
+  "name": "Fulham",
+  "lat": 51.4744,
+  "lng": -0.2068
  },
  {
   "id": "fulham-broadway",
@@ -1066,6 +1078,12 @@
   "name": "Northwood",
   "lat": 51.6052,
   "lng": -0.4206
+ },
+ {
+  "id": "notting-hill",
+  "name": "Notting Hill",
+  "lat": 51.511,
+  "lng": -0.2055
  },
  {
   "id": "nunhead",

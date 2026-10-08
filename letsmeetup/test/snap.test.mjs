@@ -57,3 +57,17 @@ test('postcode detection and lookup', async () => {
   assert.equal(url, 'https://api.postcodes.io/outcodes/SW9');
   assert.equal(await lookupPostcode('E8 3PN', async () => ({ ok: false })), null);
 });
+
+test('every curated name (MUST_HAVE and INCLUDE_EXTRA in the build script) is really in areas.json', () => {
+  const src = readFileSync(new URL('../scripts/build-areas.mjs', import.meta.url), 'utf8');
+  const block = (start) => src.slice(src.indexOf(start), src.indexOf('];', src.indexOf(start)));
+  const must = [...block('const MUST_HAVE').matchAll(/'([^']+)'|"([^"]+)"/g)].map((m) => m[1] || m[2]).filter((n) => n !== 'MUST_HAVE');
+  const extras = [...block('const INCLUDE_EXTRA').matchAll(/name: '([^']+)'/g)].map((m) => m[1]);
+  assert.ok(must.length > 100 && extras.length > 30, 'could not read the curation lists');
+
+  const key = (s) => s.normalize('NFKD').toLowerCase().replace(/[^a-z]+/g, '');
+  const have = new Set(areas.map((a) => key(a.name)));
+  const alias = { elephantandcastle: 'elephantcastle' }; // OSM's "Elephant and Castle" is renamed "Elephant & Castle"
+  const missing = [...new Set([...must, ...extras])].filter((n) => !have.has(key(n)) && !have.has(alias[key(n)] || '_'));
+  assert.deepEqual(missing, [], 'people would search for these names and find nothing');
+});

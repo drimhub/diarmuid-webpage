@@ -70,3 +70,14 @@ export function validateMe(body) {
   }
   return { value: { areaId: body.areaId, mode: body.mode, maxMinutes } };
 }
+
+// A person the organiser adds without them signing in: a display name, plus the same
+// neighbourhood / mode / limit that a signed-in person sets for themselves.
+export function validateGuest(body) {
+  const name = cleanText(body.name);
+  if (!name || name.length > LIMITS.displayNameMax) return { error: `Name must be 1-${LIMITS.displayNameMax} characters` };
+  if (name.includes('@')) return { error: 'Use a first name, not an email address' };
+  const me = validateMe(body);
+  if (me.error) return me;
+  return { value: { name, ...me.value } };
+}
