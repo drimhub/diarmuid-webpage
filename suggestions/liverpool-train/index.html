@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cian and Diarmuid's trip to Liverpool 🚂</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="back" href="/suggestions/">← back</a>
+  <h1>🚂 Cian and Diarmuid's trip to Liverpool</h1>
+  <p class="sub">London → Liverpool. Choo choo! All aboard!</p>
+
+  <div class="scene">
+    <div class="smoke" id="smoke" aria-hidden="true"></div>
+    <div class="engine-row">
+      <div class="conductor" aria-label="The fat conductor">
+        <div class="hat">🎩</div>
+        <div class="face" id="cian-face"><span>🙂</span></div>
+        <div class="body"><span class="buttons">● ● ●</span></div>
+      </div>
+      <div class="engine" aria-hidden="true">
+        <div class="stack"></div>
+        <div class="cab"></div>
+        <div class="boiler"></div>
+        <div class="wheel w1"></div><div class="wheel w2"></div><div class="wheel w3"></div>
+      </div>
+      <button type="button" class="btn toot" id="toot">Toot toot! 🚂</button>
+    </div>
+    <div class="words" id="words" aria-hidden="true"></div>
+    <div class="track"></div>
+  </div>
+
+  <div class="uploads">
+    <label class="btn">Add photos from a stop
+      <input type="file" id="photo-files" accept="image/*" multiple hidden>
+    </label>
+    <label class="btn">Upload Cian's face
+      <input type="file" id="cian-file" accept="image/*" hidden>
+    </label>
+    <button type="button" class="btn" id="reset">Reset</button>
+  </div>
+  <p class="note">Photos stay in your browser for this visit. Nothing is uploaded, saved or shared.</p>
+
+  <div class="train" id="train">
+    <p class="empty" id="empty">No photos yet. Add some and a carriage will be coupled on for each stop.</p>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
