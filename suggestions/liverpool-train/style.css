@@ -1,0 +1,39 @@
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; font-family: Georgia, "Times New Roman", serif; text-align: center; background: #f4e8d0; color: #3b2a1a; }
+.back { position: absolute; left: 12px; top: 10px; color: inherit; font-family: system-ui, sans-serif; }
+h1 { margin: 28px 0 4px; font-size: 1.6rem; }
+.sub { margin: 0 0 12px; font-style: italic; }
+.scene { position: relative; max-width: 700px; margin: 0 auto; padding-top: 70px; background: linear-gradient(#cfe3ee, #f4e8d0); border: 3px solid #3b2a1a; border-radius: 12px; overflow: hidden; }
+.smoke { position: absolute; left: 0; right: 0; top: 0; height: 100%; pointer-events: none; }
+.puff { position: absolute; bottom: 70px; width: 28px; height: 28px; border-radius: 50%; background: #fff; opacity: .9; animation: puff 3s ease-out forwards; }
+@keyframes puff { to { transform: translate(var(--dx), -140px) scale(2.4); opacity: 0; } }
+.engine-row { position: relative; display: flex; align-items: flex-end; justify-content: center; gap: 12px; padding: 8px; flex-wrap: wrap; }
+.conductor { width: 130px; position: relative; }
+.conductor .hat { font-size: 2.2rem; margin-bottom: -18px; position: relative; z-index: 2; }
+.conductor .face { width: 100px; height: 100px; margin: 0 auto; border-radius: 50%; overflow: hidden; background: #ffd9b3; border: 3px solid #3b2a1a; display: flex; align-items: center; justify-content: center; font-size: 3.5rem; }
+.conductor .face img { width: 100%; height: 100%; object-fit: cover; }
+.conductor .body { width: 130px; height: 80px; margin-top: -8px; border-radius: 50% 50% 30% 30%; background: #1f3a63; color: #e8c15a; display: flex; align-items: center; justify-content: center; border: 3px solid #3b2a1a; }
+.buttons { writing-mode: vertical-rl; letter-spacing: 4px; font-size: .8rem; }
+.engine { position: relative; width: 200px; height: 110px; }
+.boiler { position: absolute; left: 0; bottom: 20px; width: 140px; height: 60px; background: #2b2b2b; border-radius: 30px 8px 8px 30px; }
+.cab { position: absolute; right: 0; bottom: 20px; width: 70px; height: 85px; background: #8a1c1c; border: 3px solid #3b2a1a; }
+.stack { position: absolute; left: 22px; bottom: 76px; width: 24px; height: 28px; background: #2b2b2b; clip-path: polygon(20% 100%, 0 0, 100% 0, 80% 100%); }
+.wheel { position: absolute; bottom: 0; width: 40px; height: 40px; border-radius: 50%; border: 6px solid #8a1c1c; background-color: #ddd; background-image: linear-gradient(#3b2a1a, #3b2a1a), linear-gradient(#3b2a1a, #3b2a1a); background-size: 100% 3px, 3px 100%; background-position: center; background-repeat: no-repeat; animation: spin 2s linear infinite; }
+.w1 { left: 12px; } .w2 { left: 68px; } .w3 { left: 140px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.words { position: relative; height: 34px; font-style: italic; font-weight: bold; }
+.word { position: absolute; top: 0; white-space: nowrap; animation: word 2.4s ease-out forwards; }
+@keyframes word { to { transform: translateY(-20px); opacity: 0; } }
+.track { height: 10px; background: repeating-linear-gradient(90deg, #3b2a1a 0 6px, transparent 6px 22px), #8a7a66; border-top: 3px solid #3b2a1a; }
+.btn { display: inline-block; padding: 10px 14px; border: 0; border-radius: 999px; background: #8a1c1c; color: #fff; font: inherit; cursor: pointer; }
+.uploads { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
+.note { font-size: .85rem; opacity: .8; }
+.train { display: flex; align-items: flex-start; overflow-x: auto; padding: 12px 4px 28px; max-width: 100%; }
+.empty { margin: 0 auto; font-style: italic; }
+.carriage { position: relative; flex: 0 0 220px; margin-right: 18px; padding: 8px 8px 12px; background: #8a1c1c; border: 3px solid #3b2a1a; border-radius: 14px 14px 6px 6px; color: #fff; }
+.carriage::after { content: ""; position: absolute; right: -21px; top: 50%; width: 18px; height: 6px; background: #3b2a1a; }
+.carriage:last-child::after { display: none; }
+.carriage .window { height: 150px; background: #fdf6e3; border: 3px solid #e8c15a; border-radius: 40px 40px 6px 6px; overflow: hidden; }
+.carriage img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.carriage input { width: 100%; margin-top: 8px; padding: 4px; border: 0; border-radius: 6px; text-align: center; font: inherit; background: #fdf6e3; color: #3b2a1a; }
+.carriage::before { content: ""; position: absolute; bottom: -14px; left: 24px; width: 24px; height: 24px; border-radius: 50%; background: #3b2a1a; box-shadow: 120px 0 #3b2a1a; }
