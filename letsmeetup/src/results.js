@@ -52,9 +52,10 @@ export function shapeRun(run, { currentParticipants, event }) {
   const snapshot = JSON.parse(run.input_snapshot);
   const result = JSON.parse(run.result_json);
   const nameOf = Object.fromEntries(snapshot.participants.map((p) => [p.id, p.name]));
+  const areaOf = Object.fromEntries(snapshot.participants.map((p) => [p.id, p.areaId])); // a neighbourhood id, never a coordinate
 
   const shapeTravel = (t) => ({
-    perPerson: t.perPerson.map((p) => ({ participantId: p.participantId, name: nameOf[p.participantId] || 'Someone', mode: p.mode, minutes: p.minutes })),
+    perPerson: t.perPerson.map((p) => ({ participantId: p.participantId, name: nameOf[p.participantId] || 'Someone', areaId: areaOf[p.participantId] || null, mode: p.mode, minutes: p.minutes })),
     meanMinutes: t.meanMinutes,
     maxMinutes: t.maxMinutes,
     spreadMinutes: t.spreadMinutes,

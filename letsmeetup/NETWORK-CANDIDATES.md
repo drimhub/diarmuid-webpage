@@ -1,6 +1,6 @@
 # Network-aware candidate areas: design
 
-Status: **designed, not built.** This expands the "known limitation" in [ROADMAP.md](ROADMAP.md) step 6. Rules and decisions for the project are in [CLAUDE.md](CLAUDE.md).
+Status: **implemented and table built (9 October 2026); Google validation pending.** Done: `src/calc/network.js`, network candidates in `candidates.js`, `scripts/build-transit-table.mjs` (resumable, end walks stripped), tests (`test/network.test.mjs`), and the table itself (`src/data/transit-times.json`, 282 areas, TfL, Tuesday 2026-10-20 19:00 departing; 39,621 pairs in about 85 minutes with a TfL key at 8 requests a second; 14 walk-only pairs, 0 unreachable, symmetric, median 44 min, max 121). Unkeyed TfL answered about 1 request a second and returned 429 above that. Decision (9 October): deployed without the Google ground-truth validation of section 6; TfL is accepted as the source for this heuristic, so `network.offset` stays at its provisional 8 (revisit if good venues look missed). The footer credit "Contains TfL Open Data" is in `public/index.html`. This expands the "known limitation" in [ROADMAP.md](ROADMAP.md) step 6. Rules and decisions for the project are in [CLAUDE.md](CLAUDE.md).
 
 ## 1. The problem, with evidence
 
@@ -41,10 +41,27 @@ Its numbers are not Google's, though. Tuesday 13 October, 19:00 departing, same 
 | Stockwell, Oxford Circus | 25 | 22 | +3 |
 | Hampstead, Oxford Circus | 34 | 25 | +9 |
 
-The Hampstead to Euston journey is `walk 9 + Northern line 10 + walk 9`: the ride matches Google's total, but TfL adds about 18 minutes of walking at the ends (for the same pair Saturday gave 27, so it is not the date). Cause not yet understood; likely how the planner snaps a coordinate to a stop. Two consequences:
+The Hampstead to Euston journey is `walk 9 + Northern line 10 + walk 9`: the ride matches Google's total, but TfL adds about 18 minutes of walking at the ends (for the same pair Saturday gave 27, so it is not the date).
 
-1. TfL is **systematically slower and noisier than Google**, so it cannot be treated as the truth. It might still **rank** hubs correctly (on these six pairs both agree Euston is best for the pair; they disagree on Bank vs Oxford Circus), which is all we need, but that has to be measured, not assumed (section 6).
-2. Anchor quality matters. Neighbourhood anchors are not stations, and both providers include the walk from the anchor.
+**Cause found (9 October probe).** A coordinate used as the *destination* is snapped by TfL to a street address or a national-rail building, and the planner then adds a walk from the Underground station to that point (for example "Euston Railway Station" or "1 Cornhill", 9 minutes each, every time). The same journeys to the Underground station's StopPoint id take 17 min (Hampstead to Euston), 27 (Hampstead to Bank) and 24 (Stockwell to Bank), against 26, 36 and 33 with coordinates. The ride is the same either way. A coordinate *origin* adds a fair walk to the station (7 min at Hampstead, 11 at Stockwell), but that is a per-person constant. So most of the gap above was an artefact of how we called the API, not TfL being a worse model. The remaining gap (Hampstead to Euston: 17 vs Google's 11) is probably that origin walk.
+
+**Re-test with end walks stripped (9 October, Tuesday 13 October 19:00 departing, shortest stripped journey of those returned):**
+
+| From, to | TfL stripped (min) | Google (min) | Stripped minus Google |
+|---|---|---|---|
+| Stockwell, Euston | 13 | 22 | -9 |
+| Hampstead, Euston | 9 | 11 | -2 |
+| Stockwell, Bank | 13 | 22 | -9 |
+| Hampstead, Bank | 16 | 21 | -5 |
+| Stockwell, Oxford Circus | 9 | 22 | -13 |
+| Hampstead, Oxford Circus | 12 | 25 | -13 |
+
+The artefact is gone (Hampstead to Euston is no longer an outlier) and stripped times sit below Google's, as expected, because Google includes the end walks and waits. **But the ranking still differs:** for the Stockwell and Hampstead pair stripped TfL scores Oxford Circus best (mean 10.5, longest 12), then Euston (11, 13), then Bank (14.5, 16); Google scores Euston (16.5, 22), Bank (21.5, 22), Oxford Circus (23.5, 25). The gap to Google is not constant (2 to 9 min at Euston and Bank, 13 at Oxford Circus), and Google returns exactly 22 min from Stockwell to all three hubs. Six pairs prove nothing either way: all three hubs would land inside the top 4 of 282 areas and be searched, and the live Google call then chooses between them. The risk is at the margin, where a near-miss area is pushed out. The mean gap is about 9 minutes, so the runtime uses a provisional offset of 8 (`network.offset`), to be calibrated by the validation in section 6.
+
+Consequences:
+
+1. **TfL can still be slower and noisier than Google**, so it is not the truth. It might **rank** hubs correctly (on these six pairs both agree Euston is best for the pair; they disagree on Bank vs Oxford Circus), which is all we need, but that has to be measured, not assumed (section 6).
+2. **End walks are ignored, by design (section 5.2).** Neighbourhood anchors are not stations, and the end walks are either artefacts (destination snapping) or per-person constants (origin). The ranker only needs time on the network: ride, waits and interchange walks. Do not "fix" this by adding the end walks back: the person is already snapped to a neighbourhood so the exact walk means little, and the real door-to-door times come from the live Google call anyway.
 
 ## 4. Options
 
@@ -75,14 +92,14 @@ A generated file, `src/data/transit-times.json`, bundled into the Worker (not se
   "source": "tfl",
   "basis": "Tuesday 19:00 departing, scheduled",
   "builtAt": "2026-10-..",
-  "anchorsHash": "<sha256 of every area id + lat + lng>",
+  "anchorsHash": "<hash of every area id + lat + lng, order-independent>",
   "areas": ["abbey-wood", "acton", "..."],
   "minutes": "<base64 of an n x n uint8 matrix, row = from, column = to>",
   "attribution": "Contains TfL Open Data. Powered by TfL Open Data."
 }
 ```
 
-- Whole minutes, capped at 254; 255 means no journey.
+- Whole minutes of **time on the network** (end walks stripped, section 5.2), capped at 253. Two sentinels: **254 = walk-only** (no transit leg once the end walks are removed: the pair is close enough to walk) and **255 = no journey**.
 - 282 x 282 = about 80 KB raw, about 106 KB as base64 (a few KB gzipped). The Worker bundle is 102 KB today, comfortably inside Cloudflare's limits.
 - Computed for one direction per pair and mirrored (journeys are close to symmetrical, and it halves the calls: 39,000 instead of 78,000).
 - `anchorsHash` ties the table to the exact `areas.json` (ids and coordinates). A test fails if `areas.json` changes without a rebuild; the loader refuses a stale table and the calculation silently falls back to today's geometry (never an error).
@@ -95,8 +112,10 @@ A generated file, `src/data/transit-times.json`, bundled into the Worker (not se
 - `--sample N` builds only N random pairs and compares them with the previous table or with Google, as a smoke test.
 - **Resumable and incremental.** Every answer is appended to a cache (`fixtures/transit-cache.jsonl`, git-ignored) keyed by the two anchors' coordinates and the time basis. Re-running skips what is cached, so an interruption, or moving an anchor, only recomputes the affected rows and columns.
 - **Polite.** Concurrency of about 6, never above about 8 requests a second, honours `Retry-After` on 429, retries with backoff, prints progress and an ETA. A TfL app key (free, from the TfL API portal) raises the allowed rate to about 500 requests a minute; without one it still works but is slower.
-- TfL query: `date=<a clean Tuesday>&time=1900&timeIs=Departing&journeyPreference=LeastTime`, taking the **shortest duration among the returned journeys**; no journey means unreachable.
-- Estimated run: 39,000 calls at about 5 a second is about 2 hours (about 80 minutes with a key). One-off; rebuilt only when `areas.json` changes or the rail network does (about yearly).
+- TfL query: `date=<a clean Tuesday>&time=1900&timeIs=Departing&journeyPreference=LeastTime`, taking the **shortest result among the returned journeys**; no journey means unreachable.
+- **End walks are stripped.** For each journey, drop the first leg and the last leg **only if their mode is walking** (TfL labels them "walk inside building" and the walk to the street address), and sum the rest. Walking legs *between* transit legs (interchange walks) are kept, and bus legs are transit so they are kept. Because the whole journey is transit time plus interchange time, this is functionally the same as snapping each neighbourhood to its best station, without needing an area-to-station mapping (and TfL picks the best station for the journey rather than the nearest).
+- **Walk-only pairs.** If no transit leg is left after stripping, the pair is close enough to walk. Store the sentinel 254, not 0 and not TfL's walking time: 0 would make every neighbouring area look free, and TfL's walking duration brings back the coordinate-snapping noise.
+- Estimated run: 39,621 calls. **Measured:** without a key TfL answers about 1 request a second and starts returning 429 (Retry-After about 35 s) at 5 a second, which is about 11 hours; with a free app key use `--rate 8` (about 80 minutes). A 429 pauses every worker. One-off; rebuilt only when `areas.json` changes or the rail network does (about yearly).
 - The `google` source reuses the existing `getTravelTimes` provider (so the same code path, caps and batching as the live routing), restricted to a hub list.
 
 The **hub list** for source `google` (all already neighbourhoods in `areas.json`): Bank, Liverpool Street, King's Cross, Euston, London Bridge, Waterloo, Victoria, Oxford Circus, Paddington, Stratford, Canary Wharf, Clapham Junction, Vauxhall, Angel, Old Street, Borough, Elephant & Castle, Farringdon, Blackfriars, Tower Hill, Aldgate, Westminster, Holborn, Covent Garden, Soho, Marble Arch, Camden Town, Finsbury Park, Whitechapel, Shoreditch, Hammersmith, Shepherd's Bush, Earl's Court, South Kensington, Brixton, Stockwell, Kennington, Highbury, Kentish Town, Marylebone, Fitzrovia, Bayswater, Hackney, Peckham, Lewisham, Greenwich, Tottenham, Wood Green, Walthamstow, Ealing, Richmond, Wimbledon, Croydon, Putney, Battersea, Islington, Bethnal Green, Mile End, Stoke Newington, Dalston (60; trim to the best 45 by connectivity if cost matters). Baker Street is not a neighbourhood in the list and would be added.
@@ -105,7 +124,7 @@ The **hub list** for source `google` (all already neighbourhoods in `areas.json`
 
 - `src/calc/network.js`: `loadTransitTable()` (decode once, cache in the isolate), `transitMinutes(fromId, toId)`, `isUsable(areas)` (hash matches and every area is covered). No Google or TfL code here: it only reads the file, so the source can change freely.
 - `generateCandidateAreas` gains a second source of candidates:
-  1. For every area `c` (all 282, a trivial amount of work), each **transit** participant's time is `scale x T[their area][c]`; each **bike or walk** participant uses the existing straight-line estimate (the table says nothing about them). `scale` (config `network.scale`, default 1) is fitted by the validation so TfL minutes land near Google's.
+  1. For every area `c` (all 282, a trivial amount of work), each **transit** participant's time is `scale x T[their area][c]`; each **bike or walk** participant uses the existing straight-line estimate (the table says nothing about them). A **walk-only** entry (254) for a transit participant falls back to the existing straight-line estimate at **walk speed** (`estimateMinutes` with mode `walk`), never to 0. An unreachable entry (255) excludes `c` for that person, as a personal limit would. `scale` (config `network.scale`, default 1) is fitted by the validation so TfL minutes land near Google's.
   2. Score `c` with the same mean, longest and spread weights and the same personal-limit pruning (with its slack) as today.
   3. Take the best `network.candidates` (4) with the existing 600 m spacing, tagged `network` in `heuristics`.
   4. Fill the remaining slots (`maxCandidates` stays 6) with the existing geometric candidates, de-duplicated. A group with **no** transit participants gets only geometric candidates, exactly as today.
@@ -129,7 +148,10 @@ The table is a ranker, so the test is whether it ranks like Google does. This ne
 ## 7. Tests
 
 Always run (no network or fixtures needed):
-- Table encode and decode round-trips; symmetry and the 255 sentinel; capping at 254.
+- Table encode and decode round-trips; symmetry and the 254 and 255 sentinels; capping at 253.
+- Leg stripping on recorded TfL responses: first and last walking legs are dropped, an interchange walk between transit legs is kept, bus legs are kept, and a journey with no transit leg left becomes 254.
+- A walk-only pair uses the straight-line walking estimate and never scores 0.
+- **Mixed-distance group:** two people close together plus one distant person gives network candidates that serve the distant person, not a list of near-duplicates around the close pair (the geometric candidates are only a backstop, and this failure would otherwise be silent).
 - **A toy city where straight lines mislead:** two people far apart in a straight line with a fast direct line between them and a river or gap that makes the geometric midpoint slow. The geometric heuristics miss the quick interchange; the network candidate finds it.
 - A group with no transit users gets zero network candidates; a mixed group (transit and bike) combines table and estimate; personal limits prune.
 - Stale table (hash mismatch, missing area) falls back to geometry and the run still succeeds; a corrupt file does too.

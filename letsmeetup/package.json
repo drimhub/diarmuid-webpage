@@ -12,6 +12,7 @@
     "test": "node --test",
     "build:areas": "node scripts/build-areas.mjs",
     "areas:map": "node scripts/serve-areas-map.mjs",
+    "preview": "node scripts/serve-preview.mjs",
     "scenario": "node scripts/run-scenario.mjs"
   },
   "devDependencies": {

@@ -44,7 +44,7 @@
       <ul>
         <li><strong>Google</strong> for signing in, and for Google Maps Platform, which finds places and works out journey times. To do that we send the central point of each neighbourhood (never your exact location) and the places' positions.</li>
         <li><strong>Cloudflare</strong> hosts the site and its database, runs the bot check when you create an event, and keeps standard request logs.</li>
-        <li><strong>OpenStreetMap contributors</strong> supplied the list of neighbourhoods (&copy; OpenStreetMap contributors, ODbL).</li>
+        <li><strong>OpenStreetMap contributors</strong> supplied the list of neighbourhoods (&copy; OpenStreetMap contributors, ODbL), and their servers supply the map pictures. When the suggestions map appears, your browser fetches the map's code from cdnjs (Cloudflare) and map tiles from tile.openstreetmap.org, so those services see your IP address and which part of London you're looking at. The map marks the centre of each neighbourhood, never an exact location, and that information stays between your browser and them: we don't send them anything about you or the event.</li>
       </ul>
 
       <h2>How long we keep things</h2>

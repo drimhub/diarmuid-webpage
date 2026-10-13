@@ -7,6 +7,7 @@ import { areaPicker } from '/picker.js';
 import { guestForm } from '/guests.js';
 import { londonLocalToUtcIso, formatLondon, defaultStartLocal } from '/time.js';
 import { MODE_LABELS, h, renderResults } from '/view.js';
+import { resultsMap } from '/map.js';
 
 const API_HEADERS = { 'Content-Type': 'application/json', 'X-Requested-With': 'letsmeetup' };
 const TYPE_LABELS = { drinks: 'Drinks', lunch: 'Lunch', dinner: 'Dinner' };
@@ -255,7 +256,7 @@ async function eventView(code) {
     } else if (run.status === 'failed') {
       resultsBox.replaceChildren(h('p', { class: 'error' }, run.error));
     } else {
-      resultsBox.replaceChildren(...renderResults(data.results, { isOwner: data.me.isOwner }));
+      resultsBox.replaceChildren(...renderResults(data.results, { isOwner: data.me.isOwner, areas: state.areas, map: resultsMap }));
     }
   }
 

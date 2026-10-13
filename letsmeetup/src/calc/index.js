@@ -27,7 +27,8 @@ function empty(status, extra = {}) {
 // participants: [{ id, areaId|null, mode, maxMinutes|null }]
 // areas: areas.json entries { id, name, lat, lng }
 // providers: { places, routing }   config: optional overrides of DEFAULTS
-export async function computeSuggestions({ event, participants, areas, providers, config: overrides }) {
+// network: optional transit-time table (calc/network.js); without it candidates come from geometry alone
+export async function computeSuggestions({ event, participants, areas, providers, config: overrides, network = null }) {
   const config = withOverrides(DEFAULTS, overrides);
   const areaById = new Map(areas.map((a) => [a.id, a]));
   const tags = event.tags || [];
@@ -36,10 +37,10 @@ export async function computeSuggestions({ event, participants, areas, providers
   const located = participants.filter((p) => p.areaId && areaById.has(p.areaId));
   const excluded = { participantsWithoutLocation: participants.filter((p) => !located.includes(p)).map((p) => p.id) };
   if (located.length < 2) return empty('not_enough_people', { excluded });
-  const origins = located.map((p) => ({ id: p.id, lat: areaById.get(p.areaId).lat, lng: areaById.get(p.areaId).lng, mode: p.mode, maxMinutes: p.maxMinutes ?? null }));
+  const origins = located.map((p) => ({ id: p.id, areaId: p.areaId, lat: areaById.get(p.areaId).lat, lng: areaById.get(p.areaId).lng, mode: p.mode, maxMinutes: p.maxMinutes ?? null }));
 
   // 2. Where to look.
-  const candidates = generateCandidateAreas(origins, areas, config);
+  const candidates = generateCandidateAreas(origins, areas, config, network);
   const candidateSummary = candidates.map((c) => ({ areaId: c.area.id, name: c.area.name, heuristics: c.heuristics, estimatedMeanMinutes: Math.round(c.estimate.mean * 10) / 10 }));
 
   // 3. Find and filter venues, widening the search once if too few qualify.

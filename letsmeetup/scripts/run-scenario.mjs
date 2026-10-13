@@ -5,6 +5,8 @@
 //   npm run scenario -- scenarios/<file>.json --live     show the plan and worst-case cost only
 //   npm run scenario -- scenarios/<file>.json --live --yes   REAL Google calls (costs pennies); also records them
 //                                                            to fixtures/scenarios/<name>.json for --replay
+// Add --no-network to use geometric candidates only (recordings made before the network table existed,
+// such as the first Stockwell scenario, replay only with it: the table changes which areas are searched).
 // (PowerShell can swallow the `--`; run `node scripts/run-scenario.mjs <file> --replay` directly if so.)
 //
 // A scenario: event type, start (daysAhead + startLondon), tags, and people (name, area id, mode,
@@ -16,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeSuggestions } from '../src/calc/index.js';
 import { DEFAULTS } from '../src/calc/config.js';
+import { loadTransitTable } from '../src/calc/network.js';
 import { createProviders } from '../src/providers/index.js';
 import { recordingFetch, replayFetch } from '../src/providers/http.js';
 import { FileStore } from '../testing/file-store.mjs';
@@ -72,7 +75,8 @@ if (flag('live')) {
   source = 'offline fake providers (straight-line times, synthetic venues)';
 }
 
-const result = await computeSuggestions({ event, participants, areas, providers });
+const network = flag('no-network') ? null : loadTransitTable(areas);
+const result = await computeSuggestions({ event, participants, areas, providers, network });
 if (store) store.save();
 
 const who = participants.map((p) => `${names[p.id]} (${areaById.get(p.areaId).name}, ${p.mode}${p.maxMinutes ? `, max ${p.maxMinutes}m` : ''})`);

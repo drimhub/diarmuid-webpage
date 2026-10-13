@@ -112,6 +112,8 @@ test('a calculation runs in the background and the results appear', async () => 
   const s = r.suggestions[0];
   assert.deepEqual(s.travel.perPerson.map((p) => p.name), ['Alice', 'Bob', 'Carol']); // first names only
   assert.ok(s.travel.perPerson.every((p) => p.minutes > 0));
+  assert.ok(s.travel.perPerson.every((p) => typeof p.areaId === 'string')); // a neighbourhood id so the map can place them
+  assert.doesNotMatch(JSON.stringify(r), /"(lat|lng|latitude|longitude)"/); // never a coordinate
   assert.equal(typeof s.travel.furthest.name, 'string');
   assert.equal(view.data.calculation.runsUsed, 1);
 

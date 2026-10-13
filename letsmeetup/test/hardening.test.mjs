@@ -290,6 +290,13 @@ test('the CSP allows exactly what the pages use, and the pages use no inline scr
   }
   assert.ok(policy['frame-src'].some((a) => a.includes('accounts.google.com')) && policy['frame-src'].some((a) => a.includes('challenges.cloudflare.com')));
   assert.ok(policy['connect-src'].includes('https://api.postcodes.io')); // snap.js calls it
+  // map.js loads Leaflet from cdnjs (script and stylesheet) and draws OpenStreetMap tiles.
+  const mapJs = read('map.js');
+  for (const url of [...mapJs.matchAll(/'(https:\/\/cdnjs[^']+)'/g)].map((m) => m[1])) {
+    assert.ok(policy[url.endsWith('.css') ? 'style-src' : 'script-src'].some((a) => url.startsWith(a)), `${url} is not allowed by the CSP`);
+  }
+  assert.ok(policy['img-src'].includes('https://tile.openstreetmap.org') && mapJs.includes('https://tile.openstreetmap.org/'));
+  assert.match(mapJs, /integrity/); // pinned with subresource integrity
   assert.match(read('snap.js'), /https:\/\/api\.postcodes\.io/);
 
   // No inline scripts or inline event handlers on any page.
@@ -299,7 +306,7 @@ test('the CSP allows exactly what the pages use, and the pages use no inline scr
     assert.doesNotMatch(page, /\son[a-z]+\s*=/i, `${file} has an inline event handler`);
   }
   // Nothing in the app writes markup from strings.
-  for (const file of ['app.js', 'view.js', 'snap.js', 'time.js']) assert.doesNotMatch(read(file), /\.innerHTML\s*=|insertAdjacentHTML|document\.write|\beval\(/, `${file} builds HTML from strings`);
+  for (const file of ['app.js', 'view.js', 'snap.js', 'time.js', 'map.js']) assert.doesNotMatch(read(file), /\.innerHTML\s*=|insertAdjacentHTML|document\.write|\beval\(/, `${file} builds HTML from strings`);
 });
 
 test('the other security headers are set', () => {

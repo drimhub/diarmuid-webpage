@@ -1,7 +1,7 @@
 // Every tunable number in the calculation lives here, so weights can be tuned in one place against
 // recorded scenarios without touching logic. Pass overrides to computeSuggestions({ config }).
 
-export const HEURISTICS_VERSION = '1';
+export const HEURISTICS_VERSION = '2';
 
 export const DEFAULTS = {
   // How many suggestions to return.
@@ -13,6 +13,16 @@ export const DEFAULTS = {
   maxCandidates: 6,           // areas searched for venues (cost: one Places request each)
   candidateSpacingKm: 0.6,    // candidate anchors closer than this to a better one are dropped
   candidateLimitSlack: 1.4,   // drop a candidate if the straight-line estimate exceeds someone's limit by this factor
+
+  // Network-aware candidates: areas that are quick for the transit users on the rail network, taken from
+  // the precomputed table (src/calc/network.js). They take the first slots; geometry fills the rest.
+  network: {
+    enabled: true,
+    candidates: 4,   // how many of maxCandidates come from the table
+    scale: 1,        // table minutes -> real minutes
+    offset: 8,       // provisional: end walks and waits the table leaves out (calibrate with the validation)
+    slack: 1.4,      // as candidateLimitSlack, for the table's estimate
+  },
 
   // Straight-line travel estimates used only to prune candidates (the real times come from routing).
   estimate: {

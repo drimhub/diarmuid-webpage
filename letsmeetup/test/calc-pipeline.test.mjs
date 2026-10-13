@@ -37,7 +37,7 @@ test('a realistic group gets 3-5 varied, well-explained suggestions', async () =
     assert.equal(s.travel.furthest.minutes, s.travel.maxMinutes);
   }
   assert.ok(r.candidates.length >= 3);
-  assert.equal(r.heuristicsVersion, '1');
+  assert.equal(r.heuristicsVersion, '2');
 });
 
 test('the reported journeys are the provider\'s journeys, summarised correctly', async () => {

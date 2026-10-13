@@ -5,6 +5,7 @@
 import { AREAS } from './areas.js';
 import { computeSuggestions } from './calc/index.js';
 import { HEURISTICS_VERSION } from './calc/config.js';
+import { loadTransitTable } from './calc/network.js';
 import { createProviders } from './providers/index.js';
 import { newId } from './util.js';
 
@@ -138,6 +139,7 @@ export async function executeRun(env, runId) {
       participants: snap.participants.map((p) => ({ id: p.id, areaId: p.areaId, mode: p.mode, maxMinutes: p.maxMinutes })),
       areas: AREAS,
       providers,
+      network: loadTransitTable(AREAS), // null if the table is missing or stale: geometry alone
     });
     await finishRun(db, runId, run.event_id, run.prior_status, 'done', { result, cost: result.cost });
   } catch (e) {

@@ -1,6 +1,6 @@
 # Location finder: how the heuristic works today
 
-Summary of `src/calc/` as it currently stands. Every tunable number is in `src/calc/config.js` (`HEURISTICS_VERSION = '1'`). The code is pure over normalised types: it never imports Google, and providers are passed in.
+Summary of `src/calc/` as it currently stands. Every tunable number is in `src/calc/config.js` (`HEURISTICS_VERSION = '2'`). The code is pure over normalised types: it never imports Google, and providers are passed in.
 
 ## Pipeline (`src/calc/index.js`, `computeSuggestions`)
 
@@ -15,9 +15,11 @@ snapped areas -> candidate areas (free) -> venue search (Places) -> filters -> s
 - So the algorithm works on **anchor points**, not exact addresses. Each participant has a mode (`transit`, `bike`, `walk`) and an optional personal max journey time.
 - Participants without a valid area are excluded. Fewer than 2 located people gives `not_enough_people`.
 
-### 1. Candidate areas (`candidates.js`, `geo.js`) - no API cost
+### 1. Candidate areas (`candidates.js`, `network.js`, `geo.js`) - no API cost
 
-Five "centres" are computed from the participants' anchor points:
+**Network candidates (when there are transit travellers and `src/data/transit-times.json` is built).** Every area is scored by table time for the transit people (`scale x table minutes + offset`, offset 8 provisional; walk-only pairs use the walking estimate; unreachable pairs exclude the area; bike and walk people use the straight-line estimate below), with the same mean / longest / spread weights and personal-limit pruning. The best 4, spaced 600 m apart, take the first slots and are tagged `network`. Without the table they are skipped and the rest runs as before.
+
+**Geometric candidates.** Five "centres" are computed from the participants' anchor points:
 
 | Centre | Minimises |
 |---|---|
@@ -32,7 +34,7 @@ Then:
 1. Each centre snaps to its **3 nearest area anchors** (`nearestAreasPerPoint`). Anchors proposed by several centres are merged, and the proposing heuristics are remembered.
 2. Each anchor gets a **straight-line travel estimate** per person: haversine x 1.3 detour / mode speed (transit 15, bike 13, walk 4.8 km/h), plus 5 min transit wait. That gives mean, max and spread, scored as `1.0*mean + 0.7*max + 0.3*spread`.
 3. Anchors that someone couldn't reach within their own limit (x1.4 slack, since it is only an estimate) are dropped. If that would drop everything, nothing is pruned.
-4. Sort by estimate score, then keep the best **6** (`maxCandidates`), skipping any within **0.6 km** of an already kept one.
+4. Geometry fills the remaining slots up to **6** (`maxCandidates`) in total, best first, skipping any within **0.6 km** of one already kept. An area proposed by both keeps both tags.
 
 ### 2. Venue search and filtering (`venues.js`)
 
@@ -73,4 +75,4 @@ Plain JSON: status, suggestions (rank, venue, area, score and breakdown, reasons
 
 ## Known limitation
 
-Candidate areas come from straight-line geometry, so network-shaped shortcuts are missed. Two people on the same tube line are better served by an interchange on that line than by the geometric centre. The fix is planned in [NETWORK-CANDIDATES.md](NETWORK-CANDIDATES.md) and [ROADMAP.md](ROADMAP.md).
+The network table is built but not yet validated against Google (offset provisional), see [NETWORK-CANDIDATES.md](NETWORK-CANDIDATES.md). It is only a ranker of areas to search. Geometry alone (the fallback when there are no transit travellers or the table is stale) misses network-shaped shortcuts: two people on the same tube line are better served by an interchange on that line than by the geometric centre.

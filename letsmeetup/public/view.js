@@ -46,7 +46,7 @@ function journeyList(travel) {
     h('span', {}, `${p.minutes} min`, p.participantId === travel.furthest.participantId && travel.perPerson.length > 1 && h('span', { class: 'chip', style: 'margin-left:.4rem' }, 'furthest')))));
 }
 
-export function suggestionCard(s, { miss } = {}) {
+export function suggestionCard(s, { miss, onShowOnMap } = {}) {
   const href = safeMapsHref(s.mapsUrl);
   const facts = [humanType(s.primaryType), s.rating != null ? `${s.rating} ★ (${s.ratingCount ?? 0} reviews)` : null, priceText(s.priceLevel), s.openUntil, s.outdoorSeating ? 'Outdoor seating' : null].filter(Boolean);
   return h('div', { class: 'pick' },
@@ -57,10 +57,13 @@ export function suggestionCard(s, { miss } = {}) {
     s.address && h('div', { class: 'muted small' }, s.address),
     journeyList(s.travel),
     h('div', { class: 'small' }, `Average ${s.travel.meanMinutes} min · longest ${s.travel.maxMinutes} min (${s.travel.furthest.name}${s.travel.furthest.aboveMeanMinutes > 0 ? `, ${s.travel.furthest.aboveMeanMinutes} min above average` : ''})`),
-    miss && h('div', { class: 'error' }, 'Too far for: ' + miss.exceeds.map((x) => x.name).join(', ')));
+    miss && h('div', { class: 'error' }, 'Too far for: ' + miss.exceeds.map((x) => x.name).join(', ')),
+    onShowOnMap && h('button', { type: 'button', class: 'show-on-map', onclick: onShowOnMap }, 'Show journeys on map'));
 }
 
-export function renderResults(r, { isOwner }) {
+// map (optional): `(options, areas) => { el, select(rank) }`, passed in by the app so this file stays free of
+// the map library. `areas` are the areas.json entries the map positions things from.
+export function renderResults(r, { isOwner, areas, map: makeMap }) {
   const out = [];
   if (r.stale) out.push(h('p', { class: 'stale' }, isOwner ? 'Someone has changed their plans since this was worked out. Press "Find again" to update it.' : 'Someone has changed their plans since this was worked out. The organiser can update it.'));
   if (r.skipped > 0) out.push(h('p', { class: 'muted small' }, `${r.skipped} ${r.skipped === 1 ? 'person hadn\'t' : 'people hadn\'t'} said where they are travelling from, so ${r.skipped === 1 ? 'they were' : 'they were'} left out.`));
@@ -68,11 +71,13 @@ export function renderResults(r, { isOwner }) {
     out.push(h('p', {}, NO_RESULT_TEXT[r.reason] || 'We could not find suggestions this time.'));
     if (r.closestMisses.length) {
       out.push(h('p', { class: 'muted small' }, 'The closest options, which go over someone\'s limit:'));
-      out.push(...r.closestMisses.map((m) => suggestionCard(m, { miss: m })));
     }
-  } else {
-    out.push(...r.suggestions.map((s) => suggestionCard(s)));
   }
+  const shown = r.status === 'ok' ? r.suggestions : r.closestMisses;
+  const journeyMap = makeMap && areas && shown.length ? makeMap(shown, areas) : null;
+  const cardOpts = (s) => ({ miss: r.status === 'ok' ? undefined : s, onShowOnMap: journeyMap && (() => { journeyMap.select(s.rank); journeyMap.el.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }) });
+  if (journeyMap) out.push(journeyMap.el);
+  out.push(...shown.map((s) => suggestionCard(s, cardOpts(s))));
   if (r.notes.length) out.push(h('ul', { class: 'plain notes' }, r.notes.map((n) => h('li', { class: 'muted small' }, n))));
   out.push(h('p', { class: 'muted small' }, 'Place details from Google Maps.'));
   return out;
