@@ -1,0 +1,12 @@
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; font-family: system-ui, sans-serif; text-align: center; background: #f6f3ea; color: #223; }
+.back { position: absolute; left: 12px; top: 10px; color: inherit; }
+h1 { margin: 28px 0 4px; font-size: 1.6rem; }
+.sub { margin: 0 0 8px; }
+.msg { min-height: 1.6em; margin: 0 0 8px; font-size: 1.3rem; font-weight: bold; }
+.msg.win { color: #1a7a3a; }
+#map { display: block; width: 100%; max-width: 420px; height: auto; margin: 0 auto 12px; cursor: pointer; touch-action: manipulation; }
+#sea { fill: #cfe3ee; }
+#gb, #ie { fill: #a9c98b; stroke: #4d6b3a; stroke-width: 1.2; stroke-linejoin: round; }
+#dot { fill: #d33; stroke: #fff; stroke-width: 2; }
+.btn { padding: 10px 16px; border: 0; border-radius: 999px; background: #223; color: #fff; font: inherit; cursor: pointer; }
