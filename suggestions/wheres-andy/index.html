@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Where's Andy? 🗺️</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="back" href="/suggestions/">← back</a>
+  <h1>Where's Andy? 🗺️</h1>
+  <p class="sub">Click on the map to find him.</p>
+  <p class="msg" id="msg" role="status" aria-live="polite">Where's Andy?</p>
+  <svg id="map" viewBox="0 0 320 380" role="img" aria-label="Unlabelled map of the UK and Ireland. Click where you think Andy is.">
+    <rect id="sea" width="320" height="380" rx="12"></rect>
+    <polygon id="gb"></polygon>
+    <polygon id="ie"></polygon>
+    <g id="found" hidden>
+      <circle id="dot" r="7"></circle>
+      <text id="andy" text-anchor="middle" font-size="22">🧍</text>
+    </g>
+  </svg>
+  <button type="button" class="btn" id="again" hidden>Play again</button>
+  <script src="script.js"></script>
+</body>
+</html>
